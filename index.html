@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=12" />
+  <link rel="stylesheet" href="style.css?v=13" />
 
   <script>
     (function () {
@@ -349,7 +349,8 @@
         <p class="form-error" id="staffLoginError" hidden></p>
         <button type="submit" class="btn btn-primary btn-block">Sign in</button>
         <p class="hint muted small">
-          Default: <code>admin@bossb.com</code> / <code>admin1234</code>
+          Default: <code>admin@bossb.com</code> / <code>admin1234</code> ·
+          <a href="register.html" class="link-mini">Create staff account</a>
         </p>
       </form>
     </div>
@@ -512,6 +513,19 @@
         </form>
 
         <div class="danger-card">
+          <h4>Data export</h4>
+          <p class="muted small">
+            Dump the current accounts and products as JSON, matching the schema in
+            <code>data/*.json</code>. Drop these into a real backend
+            (MongoDB <code>mongoimport</code>, MySQL <code>JSON_TABLE</code>, etc.)
+            without further transformation.
+          </p>
+          <div class="row-gap">
+            <button class="btn btn-ghost" id="exportAccountsBtn">Export accounts.json</button>
+            <button class="btn btn-ghost" id="exportProductsBtn">Export products.json</button>
+          </div>
+        </div>
+        <div class="danger-card">
           <h4>Reset menu to defaults</h4>
           <p class="muted small">Erases custom menu changes.</p>
           <button class="btn btn-danger" id="resetMenuBtn">Reset menu</button>
@@ -604,7 +618,7 @@
        can include an Undo button — used for menu deletes. -->
   <div class="admin-toast-stack" id="adminToastStack" aria-live="polite"></div>
 
-  <script src="store.js?v=4"></script>
-  <script src="script.js?v=10"></script>
+  <script src="store.js?v=5"></script>
+  <script src="script.js?v=12"></script>
 </body>
 </html>

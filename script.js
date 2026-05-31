@@ -144,19 +144,19 @@ function setTableLabel(label) {
   $('#tableNumberDisplay').textContent = label || '—';
 }
 function ensureTable() {
-  let t = readTableFromURL();
-  if (!t) t = (localStorage.getItem('bossb_table') || '').trim() || null;
+  // Each page load starts fresh. URL ?table= (QR code) is the
+  // only persistent path — otherwise the customer is always
+  // asked to enter their table label or sign in as staff.
+  const t = readTableFromURL();
   if (t) {
     setTableLabel(t);
-    localStorage.setItem('bossb_table', t);
-  } else {
-    // Don't force the table prompt on a returning admin — they
-    // might just be reopening the panel and shouldn't have to
-    // type a fake table to get past this screen.
-    const session = Store.getSession();
-    if (session && session.role === 'admin') return;
-    openTableModal();
+    return;
   }
+  // Don't force the table prompt on a returning admin — they
+  // might just be reopening the panel.
+  const session = Store.getSession();
+  if (session && session.role === 'admin') return;
+  openTableModal();
 }
 function openTableModal()  { openModal('#tableModal'); }
 function closeTableModal() { closeModal('#tableModal'); }
@@ -206,7 +206,6 @@ $('#tableForm').addEventListener('submit', (e) => {
   }
   checkDuplicateTable(label, () => {
     setTableLabel(label);
-    localStorage.setItem('bossb_table', label);
     closeTableModal();
     bumpInactivity();
   });
@@ -407,6 +406,9 @@ function openCart()  {
   cartDrawer.classList.add('open');
   cartDrawer.setAttribute('aria-hidden', 'false');
   document.body.classList.add('cart-open');   // hides the FAB via CSS
+  // Opening the cart steals focus from the my-orders sheet —
+  // close it so we don't have two overlapping surfaces.
+  if (!$('#myOrdersSheet').hidden) closeMyOrders();
 }
 function closeCart() {
   cartDrawer.classList.remove('open');
@@ -419,17 +421,35 @@ $('#closeCartBtn').addEventListener('click', closeCart);
 /* Click outside the drawer to close it — but ONLY when the
    click lands on truly empty page area. Clicking a product
    card (to add another item), a category chip, a modal, or
-   any cart-related control keeps the drawer open. */
+   any cart-related control keeps the drawer open.
+   The my-orders sheet uses the same rules below. */
 document.addEventListener('click', (e) => {
-  if (!cartDrawer.classList.contains('open')) return;
   const t = e.target;
-  if (cartDrawer.contains(t))                    return;   // inside drawer
-  if (t.closest('.product-card'))                return;   // adding another item
-  if (t.closest('.chip'))                        return;   // switching categories
-  if (t.closest('.fab-cart, .fab-myorders'))     return;   // floating controls
-  if (t.closest('.modal, .myorders-sheet'))      return;   // any open popup
-  if (t.closest('.topbar-actions, .table-strip, .order-status-banner')) return;
-  closeCart();
+  const myOrdersOpen = !$('#myOrdersSheet').hidden;
+  const cartOpen     = cartDrawer.classList.contains('open');
+
+  if (cartOpen) {
+    let close = true;
+    if (cartDrawer.contains(t))                                            close = false;
+    else if (t.closest('.product-card'))                                   close = false;
+    else if (t.closest('.chip'))                                           close = false;
+    else if (t.closest('.fab-cart'))                                       close = false;
+    else if (t.closest('.modal, .myorders-sheet'))                         close = false;
+    else if (t.closest('.topbar-actions, .table-strip, .order-status-banner')) close = false;
+    if (close) closeCart();
+  }
+
+  if (myOrdersOpen) {
+    let close = true;
+    if ($('#myOrdersSheet').contains(t))                                   close = false;
+    else if (t.closest('.fab-myorders'))                                   close = false;
+    else if (t.closest('.modal, .cart-drawer'))                            close = false;
+    else if (t.closest('.topbar-actions, .order-status-banner'))           close = false;
+    // Clicking the View Cart FAB or a product card SHOULD close
+    // the my-orders sheet — the customer's attention is moving
+    // to a different surface.
+    if (close) closeMyOrders();
+  }
 });
 
 /* Shake animation — called whenever an item is added to the
@@ -898,7 +918,6 @@ function resetForNextCustomer() {
   // active-order pointer and the table label. Orders remain in
   // the store for the admin to clear/serve.
   clearActiveOrder();
-  localStorage.removeItem('bossb_table');
   setTableLabel(null);
   clearCart();
   closeMyOrders();
@@ -990,23 +1009,17 @@ document.addEventListener('keydown', (e) => {
 const staffLoginModal = $('#staffLoginModal');
 function openStaffLogin()  { openModal('#staffLoginModal'); }
 function closeStaffLogin() { closeModal('#staffLoginModal'); $('#staffLoginError').hidden = true; }
-$('#openStaffLoginBtn').addEventListener('click', () => {
-  // If a valid admin session is still cached, skip the login
-  // form and drop them straight into the panel. Otherwise
-  // show the login form.
-  const session = Store.getSession();
-  if (session && session.role === 'admin') enterAdminPanel(session);
-  else                                      openStaffLogin();
-});
-
-/* Staff escape hatch on the forced table modal — lets an admin
-   sign in without first being forced to type a table label
-   (which would otherwise be locked in as this device's table). */
+/* Always present the login form when a staff button is clicked.
+   We used to fast-path into the panel if a session was cached,
+   but that surprised admins who expected to re-enter credentials
+   each time they tap "Staff Login" (it looked like a security
+   gap, not a convenience). Both buttons now route through the
+   form; the form's submit handler still uses the cached
+   credentials path if the user gives valid ones. */
+$('#openStaffLoginBtn').addEventListener('click', openStaffLogin);
 $('#tableStaffLoginBtn').addEventListener('click', () => {
   closeTableModal();
-  const session = Store.getSession();
-  if (session && session.role === 'admin') enterAdminPanel(session);
-  else                                      openStaffLogin();
+  openStaffLogin();
 });
 
 /* Header Admin shortcut — visible only when a staff session
@@ -1060,10 +1073,16 @@ function enterAdminPanel(session) {
   loadSettingsForm();
   refreshAdminHeaderBtn();
   refreshAdminActivity();
+  // Lock the page-level scroll so we only get the panel's
+  // .admin-content scrollbar — not a second one from the
+  // customer view underneath. Uses a class so the modal
+  // open/close inline-style toggles don't clobber it.
+  document.body.classList.add('admin-open');
 }
 function exitAdminPanel()  {
   adminPanel.hidden = true;
   refreshAdminHeaderBtn();
+  document.body.classList.remove('admin-open');
 }
 function adminSignOut() {
   Store.logout();
@@ -1392,6 +1411,21 @@ $('#saveSettingsBtn').addEventListener('click', () => {
   CONFIG = Store.getConfig();
   applyConfigToDOM();
   showAdminToast({ title: 'Settings saved', variant: 'success' });
+});
+
+/* Dump the live store back to the same JSON shape the seed
+   files use. Drop these into data/ to update the cold-start
+   seed, or feed them into a real backend (mongoimport,
+   MySQL JSON_TABLE, etc.). */
+$('#exportAccountsBtn').addEventListener('click', async () => {
+  const users = await Store.getUsers();
+  triggerDownload('accounts.json', JSON.stringify(users, null, 2), 'application/json');
+  showAdminToast({ title: `Exported ${users.length} account${users.length === 1 ? '' : 's'}`, variant: 'success' });
+});
+$('#exportProductsBtn').addEventListener('click', () => {
+  const menu = Store.getMenu();
+  triggerDownload('products.json', JSON.stringify(menu, null, 2), 'application/json');
+  showAdminToast({ title: `Exported ${menu.length} products`, variant: 'success' });
 });
 
 $('#resetMenuBtn').addEventListener('click', () => {
@@ -1725,9 +1759,12 @@ $('#downloadReceiptBtn').addEventListener('click', () => {
 
 /* ==========================================================
    DAILY REPORT  (CSV exporter)
-   - One row per order placed today, with tax breakdown.
-   - Summary row at the bottom (gross / net / tax).
-   - "Today" = local-time calendar day.
+   - One row per order placed today.
+   - Metadata block at the top uses real cells (not # comments)
+     so Excel/Sheets reads them as a header table.
+   - Totals row uses live SUM formulas referencing the data
+     range so editing/removing rows in the spreadsheet keeps
+     the totals correct.
    ========================================================== */
 function buildDailyCsv() {
   const orders = Store.getOrders();
@@ -1740,52 +1777,105 @@ function buildDailyCsv() {
   };
   const todays = orders.filter(o => sameDay(o.placedAt));
 
+  // Helper: spreadsheet-style ISO date format (Excel and Sheets
+  // both auto-parse this as a date for sorting / filtering).
+  const fmtDate = (iso) => {
+    if (!iso) return '';
+    const t = new Date(iso);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}`;
+  };
+
   const headers = [
     'Order #', 'Table', 'Placed', 'Served', 'Status',
-    'Items', 'Subtotal', `${CONFIG.taxLabel || 'Tax'} (${CONFIG.taxRate}%)`, 'Total',
+    'Items', 'Qty',
+    'Subtotal', `${CONFIG.taxLabel || 'Tax'} (${CONFIG.taxRate}%)`, 'Total',
   ];
-  const rows = todays.map(o => {
+
+  const dataRows = todays.map(o => {
     const { subtotal, tax, grand } = taxBreakdown(o.total);
     const itemsSummary = o.items
-      .map(i => `${i.qty}x ${i.name}${i.summary ? ' (' + i.summary + ')' : ''}`)
+      .map(i => `${i.qty}× ${i.name}${i.summary ? ' (' + i.summary + ')' : ''}`)
       .join('; ');
+    const qtyTotal = o.items.reduce((s, i) => s + i.qty, 0);
     return [
       o.number,
       o.tableNumber || '',
-      new Date(o.placedAt).toLocaleString(),
-      o.servedAt ? new Date(o.servedAt).toLocaleString() : '',
+      fmtDate(o.placedAt),
+      fmtDate(o.servedAt),
       o.status,
       itemsSummary,
-      subtotal.toFixed(2),
-      tax.toFixed(2),
-      grand.toFixed(2),
+      qtyTotal,
+      Number(subtotal.toFixed(2)),
+      Number(tax.toFixed(2)),
+      Number(grand.toFixed(2)),
     ];
   });
 
-  // Totals across served orders only — cancelled/pending don't
-  // count toward "revenue collected today".
-  const served = todays.filter(o => o.status === 'served');
-  let sumSub = 0, sumTax = 0, sumGrand = 0;
-  served.forEach(o => {
-    const b = taxBreakdown(o.total);
-    sumSub += b.subtotal; sumTax += b.tax; sumGrand += b.grand;
-  });
-
+  // CSV escape — also wraps values that *look* like a formula
+  // unless we explicitly want the formula behavior, so we'll
+  // pass formulas through a sentinel object.
   const csvEscape = (v) => {
+    if (v && typeof v === 'object' && v.__formula) return v.__formula;
     const s = String(v ?? '');
     return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
+  const formula = (f) => ({ __formula: f });
+
   const lines = [];
-  lines.push(`# ${CONFIG.businessName || CONFIG.shopName} — Daily Report`);
-  lines.push(`# Generated: ${now.toLocaleString()}`);
-  lines.push(`# Currency: ${CONFIG.currency} · Tax: ${CONFIG.taxLabel} ${CONFIG.taxRate}% (${CONFIG.taxInclusive ? 'inclusive' : 'exclusive'})`);
-  lines.push('');
+
+  // Metadata block — real cells so Excel parses them as a small
+  // header table rather than dumping them into column A.
+  lines.push([`${CONFIG.businessName || CONFIG.shopName} — Daily Report`].map(csvEscape).join(','));
+  lines.push(['Generated',  fmtDate(now.toISOString())].map(csvEscape).join(','));
+  lines.push(['Currency',   CONFIG.currency].map(csvEscape).join(','));
+  lines.push(['Tax',        `${CONFIG.taxLabel} ${CONFIG.taxRate}% (${CONFIG.taxInclusive ? 'inclusive' : 'exclusive'})`].map(csvEscape).join(','));
+  lines.push(['Orders today', todays.length].map(csvEscape).join(','));
+  lines.push('');                              // blank spacer
+
+  // Header row sits at this 1-based spreadsheet row number;
+  // remember it so the formulas below can reference the data
+  // range precisely (first data row = headerRow + 1).
+  const headerRow = lines.length + 1;
   lines.push(headers.map(csvEscape).join(','));
-  rows.forEach(r => lines.push(r.map(csvEscape).join(',')));
-  lines.push('');
-  lines.push(['', '', '', '', 'SERVED TOTALS', `${served.length} orders`,
-              sumSub.toFixed(2), sumTax.toFixed(2), sumGrand.toFixed(2)].map(csvEscape).join(','));
-  return { csv: lines.join('\n'), todayCount: todays.length, servedCount: served.length };
+  dataRows.forEach(r => lines.push(r.map(csvEscape).join(',')));
+
+  // Total / formula footer. Two rows:
+  //   - "ALL ORDERS" sums every row in the data range.
+  //   - "SERVED ONLY" filters by status using SUMIF — so if the
+  //     admin edits statuses inside the spreadsheet, totals
+  //     update live.
+  if (dataRows.length > 0) {
+    const firstDataRow = headerRow + 1;
+    const lastDataRow  = headerRow + dataRows.length;
+    const colQty   = 'G';
+    const colSub   = 'H';
+    const colTax   = 'I';
+    const colTotal = 'J';
+    const colStatus = 'E';
+    const rng = (col) => `${col}${firstDataRow}:${col}${lastDataRow}`;
+
+    lines.push('');
+    lines.push([
+      '', '', '', '', 'ALL ORDERS', '',
+      formula(`=SUM(${rng(colQty)})`),
+      formula(`=SUM(${rng(colSub)})`),
+      formula(`=SUM(${rng(colTax)})`),
+      formula(`=SUM(${rng(colTotal)})`),
+    ].map(csvEscape).join(','));
+    lines.push([
+      '', '', '', '', 'SERVED ONLY', '',
+      formula(`=SUMIF(${rng(colStatus)},"served",${rng(colQty)})`),
+      formula(`=SUMIF(${rng(colStatus)},"served",${rng(colSub)})`),
+      formula(`=SUMIF(${rng(colStatus)},"served",${rng(colTax)})`),
+      formula(`=SUMIF(${rng(colStatus)},"served",${rng(colTotal)})`),
+    ].map(csvEscape).join(','));
+  }
+
+  const servedCount = todays.filter(o => o.status === 'served').length;
+  // Prefix BOM so Excel detects UTF-8 (the ₱ / × glyphs render
+  // correctly when double-clicked on Windows).
+  return { csv: '﻿' + lines.join('\r\n'), todayCount: todays.length, servedCount };
 }
 
 function triggerDownload(filename, content, mime = 'text/plain') {
@@ -1842,7 +1932,12 @@ function timeAgo(d) {
 async function boot() {
   initTheme();
   applyConfigToDOM();
-  await Store.seedIfEmpty();
+  // Migration: an older build cached the table label here so
+  // the customer wouldn't have to retype it after reload. We
+  // now always re-prompt — clean the stale key on boot so it
+  // doesn't accidentally pre-fill.
+  localStorage.removeItem('bossb_table');
+  await Store.bootSeed();
 
   // Always boot into the customer view. Admins click Staff
   // Login to enter the panel — they're never auto-redirected
@@ -1850,7 +1945,13 @@ async function boot() {
   // skip the form if they reopen the panel within the 8-hour
   // session window (handled in the Staff Login click handler).
 
-  ensureTable();
+  // If we arrived from register.html (or a deep link), open the
+  // staff login form immediately. Don't auto-prompt for table.
+  if (new URLSearchParams(location.search).get('staff') === '1') {
+    openStaffLogin();
+  } else {
+    ensureTable();
+  }
   renderMenu();
   updateCart();
   refreshOrdersBadge();
