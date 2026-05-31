@@ -169,6 +169,138 @@ async function fetchJsonFile(path) {
 }
 
 /* ==========================================================
+   SUPABASE BACKEND  (cross-device realtime mirror)
+   ----------------------------------------------------------
+   Strategy: localStorage stays the synchronous source of
+   truth that the rest of the app reads from. When remote mode
+   is on, writes also hit Supabase (fire-and-forget) and a
+   realtime subscription patches localStorage back when other
+   devices write. The synchronous Store API never changes.
+   ========================================================== */
+const BB_CFG = (typeof window !== 'undefined' && window.BB_CONFIG) || {};
+const SUPABASE_URL = String(BB_CFG.SUPABASE_URL || '')
+  .replace(/\/+$/, '')
+  .replace(/\/rest\/v1$/, '');   // tolerate the common copy-paste mistake
+const SUPABASE_KEY = String(BB_CFG.SUPABASE_ANON_KEY || '');
+const REMOTE_MODE = !!(SUPABASE_URL && SUPABASE_KEY && typeof window !== 'undefined' && window.supabase);
+/* Named `sb` rather than `supabase` because the UMD bundle from
+   the CDN already binds `window.supabase` to the SDK namespace;
+   declaring a top-level `const supabase` would collide with it. */
+const sb = REMOTE_MODE ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  realtime: { params: { eventsPerSecond: 10 } },
+}) : null;
+
+if (REMOTE_MODE) console.info('[Store] Supabase REMOTE mode enabled →', SUPABASE_URL);
+else             console.info('[Store] LOCAL mode (no Supabase URL in config.js — cross-device sync disabled)');
+
+/* Row ↔ JS object mapping. Postgres tables use snake_case;
+   the in-memory app uses camelCase, mirroring the JSON file
+   shape. Centralised here so the rest of the store doesn't
+   need to know about either side. */
+const ROW_TO_ORDER = (r) => r && ({
+  id:          r.id,
+  number:      r.number,
+  tableNumber: r.table_number,
+  clientId:    r.client_id,
+  items:       r.items,
+  total:       Number(r.total),
+  notes:       r.notes || '',
+  status:      r.status,
+  placedAt:    r.placed_at,
+  servedAt:    r.served_at,
+  cancelledAt: r.cancelled_at,
+  cancelledBy: r.cancelled_by,
+});
+const ORDER_TO_ROW = (o) => ({
+  id:           o.id,
+  number:       o.number,
+  table_number: o.tableNumber || null,
+  client_id:    o.clientId,
+  items:        o.items,
+  total:        o.total,
+  notes:        o.notes || '',
+  status:       o.status,
+  placed_at:    o.placedAt,
+  served_at:    o.servedAt,
+  cancelled_at: o.cancelledAt || null,
+  cancelled_by: o.cancelledBy || null,
+});
+const ROW_TO_PRODUCT = (r) => r && ({
+  id:       r.id,
+  name:     r.name,
+  category: r.category,
+  price:    Number(r.price),
+  emoji:    r.emoji,
+  desc:     r.description,
+  tag:      r.tag || undefined,
+  img:      r.img || '',
+  options:  r.options || {},
+});
+const PRODUCT_TO_ROW = (p) => ({
+  id:          p.id,
+  name:        p.name,
+  category:    p.category,
+  price:       p.price,
+  emoji:       p.emoji,
+  description: p.desc,
+  tag:         p.tag || null,
+  img:         p.img || '',
+  options:     p.options || {},
+  updated_at:  new Date().toISOString(),
+});
+const ROW_TO_USER = (r) => r && ({
+  id:           r.id,
+  email:        r.email,
+  name:         r.name,
+  role:         r.role,
+  passwordHash: r.password_hash,
+  createdAt:    r.created_at,
+});
+const USER_TO_ROW = (u) => ({
+  id:            u.id,
+  email:         u.email,
+  name:          u.name,
+  role:          u.role,
+  password_hash: u.passwordHash,
+  created_at:    u.createdAt,
+});
+const ROW_TO_LOG = (r) => r && ({
+  id:      r.id,
+  type:    r.type,
+  message: r.message,
+  orderId: r.order_id || undefined,
+  ts:      r.created_at,
+  ...(r.payload || {}),
+});
+const LOG_TO_ROW = (e) => ({
+  id:         e.id,
+  type:       e.type,
+  message:    e.message,
+  order_id:   e.orderId || null,
+  payload:    Object.fromEntries(
+    Object.entries(e).filter(([k]) =>
+      !['id','type','message','orderId','ts'].includes(k))
+  ),
+  created_at: e.ts,
+});
+
+/* Fire-and-forget remote write. Errors are logged but never
+   propagate — the local cache is already updated optimistically,
+   so a network blip doesn't break the UI. */
+function remoteUpsert(table, row, mapFn) {
+  if (!REMOTE_MODE) return Promise.resolve();
+  return sb.from(table).upsert(row).then(({ error }) => {
+    if (error) console.warn(`[Store] supabase upsert ${table} failed`, error);
+  });
+}
+function remoteDelete(table, idCol, id) {
+  if (!REMOTE_MODE) return Promise.resolve();
+  return sb.from(table).delete().eq(idCol, id).then(({ error }) => {
+    if (error) console.warn(`[Store] supabase delete ${table} failed`, error);
+  });
+}
+
+/* ==========================================================
    STORE API
    ========================================================== */
 const Store = {
@@ -182,15 +314,24 @@ const Store = {
     const idx  = menu.findIndex(m => m.id === item.id);
     if (idx === -1) menu.push(item);
     else            menu[idx] = item;
-    return Store.setMenu(menu);
+    Store.setMenu(menu);
+    remoteUpsert('bb_products', PRODUCT_TO_ROW(item));
+    return true;
   },
   deleteMenuItem(id) {
-    return Store.setMenu(Store.getMenu().filter(m => m.id !== id));
+    Store.setMenu(Store.getMenu().filter(m => m.id !== id));
+    remoteDelete('bb_products', 'id', id);
+    return true;
   },
 
   /* ----- Config ----- */
   getConfig()       { return { ...DEFAULT_CONFIG, ...readJSON(STORE_KEYS.config, {}) }; },
-  setConfig(patch)  { return writeJSON(STORE_KEYS.config, { ...Store.getConfig(), ...patch }); },
+  setConfig(patch)  {
+    const merged = { ...Store.getConfig(), ...patch };
+    writeJSON(STORE_KEYS.config, merged);
+    remoteUpsert('bb_config', { id: 1, data: merged, updated_at: new Date().toISOString() });
+    return true;
+  },
   resetConfig()     { localStorage.removeItem(STORE_KEYS.config); },
 
   /* ==========================================================
@@ -222,6 +363,7 @@ const Store = {
     };
     orders.unshift(order);                    // newest first
     Store.setOrders(orders);
+    remoteUpsert('bb_orders', ORDER_TO_ROW(order));
     Store.pushLog({
       type:    'order_placed',
       message: `Order #${order.number} placed at ${order.tableNumber || '—'}`,
@@ -237,6 +379,7 @@ const Store = {
     o.status = status;
     if (status === 'served') o.servedAt = new Date().toISOString();
     Store.setOrders(orders);
+    remoteUpsert('bb_orders', ORDER_TO_ROW(o));
     // Intentional: no log entry. Admin-initiated status changes
     // already produce a toast — the bell log is for events the
     // admin needs to be notified about (incoming orders,
@@ -257,6 +400,7 @@ const Store = {
     o.cancelledBy = 'customer';
     o.cancelledAt = new Date().toISOString();
     Store.setOrders(orders);
+    remoteUpsert('bb_orders', ORDER_TO_ROW(o));
     Store.pushLog({
       type:    'order_status',
       status:  'cancelled',
@@ -301,13 +445,20 @@ const Store = {
   },
 
   deleteOrder(orderId) {
-    // Admin-initiated; toast suffices. No log entry.
-    return Store.setOrders(Store.getOrders().filter(x => x.id !== orderId));
+    Store.setOrders(Store.getOrders().filter(x => x.id !== orderId));
+    remoteDelete('bb_orders', 'id', orderId);
+    return true;
   },
 
   clearServedOrders() {
-    // Admin-initiated bulk; toast suffices. No log entry.
-    return Store.setOrders(Store.getOrders().filter(o => o.status !== 'served'));
+    const served = Store.getOrders().filter(o => o.status === 'served');
+    Store.setOrders(Store.getOrders().filter(o => o.status !== 'served'));
+    if (REMOTE_MODE && served.length) {
+      sb.from('bb_orders').delete().eq('status', 'served').then(({ error }) => {
+        if (error) console.warn('[Store] supabase clear-served failed', error);
+      });
+    }
+    return true;
   },
 
   /* Per-browser anonymous id. Generated on first call and
@@ -416,9 +567,11 @@ const Store = {
   pushLog(entry) {
     const log = Store.getLog();
     const id  = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-    log.unshift({ id, ts: new Date().toISOString(), ...entry });
+    const row = { id, ts: new Date().toISOString(), ...entry };
+    log.unshift(row);
     if (log.length > 50) log.length = 50;
     Store.setLog(log);
+    remoteUpsert('bb_activity', LOG_TO_ROW(row));
     return id;
   },
   clearLog() { localStorage.removeItem(STORE_KEYS.log); },
@@ -508,15 +661,17 @@ const Store = {
       return;
     }
 
-    users.push({
+    const seed = {
       id:           'u_seed_admin',
       email:        SEED_EMAIL,
       passwordHash: expectedHash,
       name:         'Admin',
       role:         'admin',
       createdAt:    new Date().toISOString(),
-    });
+    };
+    users.push(seed);
     writeJSON(STORE_KEYS.users, users);
+    remoteUpsert('bb_accounts', USER_TO_ROW(seed));
     console.info(`[Store] seeded default admin: ${SEED_EMAIL} / ${SEED_PASSWORD}`);
   },
 
@@ -528,19 +683,149 @@ const Store = {
      after to guarantee the default admin exists.
      ========================================================== */
   async bootSeed() {
-    if (!localStorage.getItem(STORE_KEYS.menu)) {
-      const seedMenu = await fetchJsonFile('data/products.json');
-      if (Array.isArray(seedMenu) && seedMenu.length) {
+    // LOCAL mode (no SUPABASE_URL in config.js) — original behavior:
+    // pull seeds from data/*.json once, then use localStorage.
+    if (!REMOTE_MODE) {
+      if (!localStorage.getItem(STORE_KEYS.menu)) {
+        const seedMenu = await fetchJsonFile('data/products.json');
+        if (Array.isArray(seedMenu) && seedMenu.length) {
+          writeJSON(STORE_KEYS.menu, seedMenu);
+        }
+      }
+      if (!localStorage.getItem(STORE_KEYS.users)) {
+        const seedUsers = await fetchJsonFile('data/accounts.json');
+        if (Array.isArray(seedUsers) && seedUsers.length) {
+          writeJSON(STORE_KEYS.users, seedUsers);
+        }
+      }
+      await Store.seedIfEmpty();
+      return;
+    }
+
+    // REMOTE mode — pull authoritative state from Supabase and
+    // mirror into localStorage so the rest of the Store API
+    // (which reads synchronously from localStorage) still works.
+    try {
+      const [orders, products, configRow, users, logs] = await Promise.all([
+        sb.from('bb_orders').select('*').order('placed_at', { ascending: false }).limit(500),
+        sb.from('bb_products').select('*'),
+        sb.from('bb_config').select('data').eq('id', 1).maybeSingle(),
+        sb.from('bb_accounts').select('*'),
+        sb.from('bb_activity').select('*').order('created_at', { ascending: false }).limit(50),
+      ]);
+      if (orders.data)   writeJSON(STORE_KEYS.orders, orders.data.map(ROW_TO_ORDER));
+      if (products.data && products.data.length) {
+        writeJSON(STORE_KEYS.menu, products.data.map(ROW_TO_PRODUCT));
+      } else {
+        // First-run: seed products table from the JSON file.
+        // If the file fetch fails (e.g. opening index.html via
+        // file://) we still have the in-code DEFAULT_MENU to
+        // fall back on, so the customer never sees a blank
+        // menu grid. The seed is then pushed to Supabase so
+        // subsequent visits skip this path.
+        let seedMenu = await fetchJsonFile('data/products.json');
+        if (!Array.isArray(seedMenu) || !seedMenu.length) {
+          console.warn('[Store] data/products.json unreachable — using built-in DEFAULT_MENU');
+          seedMenu = DEFAULT_MENU;
+        }
         writeJSON(STORE_KEYS.menu, seedMenu);
+        const { error } = await sb.from('bb_products').upsert(
+          seedMenu.map(PRODUCT_TO_ROW)
+        );
+        if (error) console.warn('[Store] supabase product seed failed', error);
+        else        console.info(`[Store] seeded ${seedMenu.length} products into Supabase`);
       }
-    }
-    if (!localStorage.getItem(STORE_KEYS.users)) {
-      const seedUsers = await fetchJsonFile('data/accounts.json');
-      if (Array.isArray(seedUsers) && seedUsers.length) {
-        writeJSON(STORE_KEYS.users, seedUsers);
+      if (configRow.data && configRow.data.data) {
+        writeJSON(STORE_KEYS.config, { ...DEFAULT_CONFIG, ...configRow.data.data });
       }
+      if (users.data)    writeJSON(STORE_KEYS.users, users.data.map(ROW_TO_USER));
+      if (logs.data)     writeJSON(STORE_KEYS.log,   logs.data.map(ROW_TO_LOG));
+    } catch (e) {
+      console.warn('[Store] supabase initial fetch failed, falling back to local cache', e);
     }
+
     await Store.seedIfEmpty();
+    Store._wireRealtime();
+  },
+
+  /* Realtime subscription — Supabase pushes any INSERT/UPDATE/
+     DELETE on the watched tables over a websocket. We patch the
+     localStorage cache, then dispatch a synthetic `storage`
+     event so the existing cross-tab refresh logic in script.js
+     fires identically for remote changes. */
+  _wireRealtime() {
+    if (!REMOTE_MODE || Store._realtimeWired) return;
+    Store._realtimeWired = true;
+
+    const ordersChannel = sb.channel('bb_orders_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bb_orders' }, (payload) => {
+        const orders = Store.getOrders();
+        if (payload.eventType === 'DELETE') {
+          const filtered = orders.filter(o => o.id !== payload.old.id);
+          writeJSON(STORE_KEYS.orders, filtered);
+        } else {
+          const incoming = ROW_TO_ORDER(payload.new);
+          const idx = orders.findIndex(o => o.id === incoming.id);
+          if (idx >= 0) orders[idx] = incoming;
+          else          orders.unshift(incoming);
+          writeJSON(STORE_KEYS.orders, orders);
+        }
+        Store._dispatchSync('bb_orders');
+      })
+      .subscribe();
+
+    const productsChannel = sb.channel('bb_products_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bb_products' }, (payload) => {
+        const menu = Store.getMenu();
+        if (payload.eventType === 'DELETE') {
+          writeJSON(STORE_KEYS.menu, menu.filter(m => m.id !== payload.old.id));
+        } else {
+          const item = ROW_TO_PRODUCT(payload.new);
+          const idx  = menu.findIndex(m => m.id === item.id);
+          if (idx >= 0) menu[idx] = item;
+          else          menu.push(item);
+          writeJSON(STORE_KEYS.menu, menu);
+        }
+        Store._dispatchSync('bb_menu');
+      })
+      .subscribe();
+
+    const configChannel = sb.channel('bb_config_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bb_config' }, (payload) => {
+        if (payload.new && payload.new.data) {
+          writeJSON(STORE_KEYS.config, { ...DEFAULT_CONFIG, ...payload.new.data });
+          Store._dispatchSync('bb_config');
+        }
+      })
+      .subscribe();
+
+    const activityChannel = sb.channel('bb_activity_changes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bb_activity' }, (payload) => {
+        const entry = ROW_TO_LOG(payload.new);
+        const log   = Store.getLog();
+        if (log.some(e => e.id === entry.id)) return;     // echo of our own write
+        log.unshift(entry);
+        if (log.length > 50) log.length = 50;
+        Store.setLog(log);
+        Store._dispatchSync('bb_activity_log');
+      })
+      .subscribe();
+
+    console.info('[Store] realtime channels subscribed');
+  },
+
+  /* The browser's native `storage` event only fires in OTHER
+     tabs of the same origin. Realtime updates arrive in THIS
+     tab via the websocket, so we synthesize the same shape
+     of event to feed the existing cross-tab listener in
+     script.js — one code path handles both transports. */
+  _dispatchSync(key) {
+    try {
+      window.dispatchEvent(new StorageEvent('storage', { key }));
+    } catch {
+      // Older browsers don't allow constructing StorageEvent — fall back to a custom event.
+      window.dispatchEvent(new CustomEvent('bb-sync', { detail: { key } }));
+    }
   },
 
   /* Register a new account. Used by register.html (which must
@@ -579,6 +864,7 @@ const Store = {
     };
     users.push(account);
     writeJSON(STORE_KEYS.users, users);
+    remoteUpsert('bb_accounts', USER_TO_ROW(account));
     return account;
   },
 
@@ -605,6 +891,7 @@ const Store = {
   },
 };
 
+Store.isRemote = () => REMOTE_MODE;
 window.Store = Store;
 window.DEFAULT_MENU = DEFAULT_MENU;
 window.DEFAULT_CONFIG = DEFAULT_CONFIG;

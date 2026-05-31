@@ -1,5 +1,31 @@
 # BossB Coffee Shop — Data files
 
+## Two storage modes
+
+1. **Local mode** (default, no setup): everything lives in `localStorage`.
+   Real cross-device sync does not work — `localStorage` is per-browser.
+   The JSON files in this folder are the cold-start seed.
+
+2. **Supabase mode**: the app talks to a hosted Postgres + realtime
+   websocket. Customer and admin tabs on different devices see each
+   other's updates within ~100ms. Enable it by pasting your project's
+   URL + anon key into `config.js`.
+
+## Switching to Supabase mode (one-time setup)
+
+1. Create a free Supabase project at https://supabase.com (Sign in with
+   GitHub — same account as your repo).
+2. Open the SQL Editor in the dashboard and paste the entire contents
+   of `data/supabase.sql`. Hit Run. This creates the four tables,
+   enables realtime, and sets up RLS.
+3. Open Project Settings → API. Copy the `URL` and the `anon public`
+   key into `config.js` at the project root.
+4. Refresh the app. It should now switch to Supabase mode automatically.
+
+To go back to local mode, set `SUPABASE_URL: ''` in `config.js`.
+
+
+
 These JSON files are the **seed source** for the app. On first load, when
 `localStorage` is empty, the browser fetches these and uses them to populate
 the in-memory store.
