@@ -209,7 +209,10 @@ function closeTableModal() { closeModal('#tableModal'); }
       device — this is the legitimate "joining this table?" case
       (one person paid, friends are adding more rounds). */
 function checkDuplicateTable(label, onAccept) {
-  // Layer 1 — live session collision.
+  // Layer 1 — live session collision on ANOTHER device of the
+  // same browser (intra-browser only; cross-device collisions
+  // are caught by the orders check below since orders sync
+  // through Supabase).
   const conflictId = Store.findActiveSessionByName(label);
   if (conflictId) {
     showToast(`"${label}" is already in use on another device. Please pick a different label.`, 'error');
@@ -217,13 +220,26 @@ function checkDuplicateTable(label, onAccept) {
     $('#tableInput').select();
     return;
   }
-  // Layer 2 — order-based duplicate (legitimate table-sharing).
-  const myId   = Store.getClientId();
-  const others = Store.findActiveOrdersByTable(label).filter(o => o.clientId !== myId);
-  if (others.length === 0) { onAccept(); return; }
+  // Layer 2 — any active order at this label, from any device
+  // (including this one). Triggering on own-clientId too lets
+  // a customer who's reopening the page see "you already have
+  // an open order here — continue with it?" instead of silently
+  // re-using the label.
+  const matches = Store.findActiveOrdersByTable(label);
+  if (matches.length === 0) { onAccept(); return; }
 
+  const myId  = Store.getClientId();
+  const isOwn = matches.every(o => o.clientId === myId);
   $('#dupTableLabel').textContent = label;
-  $('#dupTableCount').textContent = others.length === 1 ? 'an' : `${others.length}`;
+  $('#dupTableCount').textContent = matches.length === 1 ? 'an' : `${matches.length}`;
+  // Re-label the prompt so the wording matches the situation —
+  // "your own open order" vs "someone else's at the same table".
+  const desc = $('#dupTableDesc');
+  if (desc) {
+    desc.textContent = isOwn
+      ? `You already have ${matches.length === 1 ? 'an' : matches.length} open order here. Continue with it, or sit somewhere else?`
+      : `Looks like ${label} already has ${matches.length === 1 ? 'an' : matches.length} open order on another device. Are you joining that table, or did you sit down somewhere else?`;
+  }
   pendingTableLabel = label;
   pendingTableAccept = onAccept;
   openModal('#dupTableModal');
@@ -992,19 +1008,40 @@ function maybeShowThanks() {
     showThanksOverlay();
   }
 }
+/* Tracks the auto-reset timer so a customer choosing "Continue
+   as same user" can cancel the impending reset cleanly. */
+let thanksAutoResetTimer = null;
 function showThanksOverlay() {
   const ov = $('#thanksOverlay');
   ov.hidden = false;
   ov.setAttribute('aria-hidden', 'false');
   requestAnimationFrame(() => ov.classList.add('open'));
-  // Auto-reset table after 8s (customer can also dismiss to reset now)
-  setTimeout(resetForNextCustomer, 8000);
+  // 30-second safety auto-reset for the case where the customer
+  // just walks away from the device. Both action buttons cancel
+  // it explicitly.
+  if (thanksAutoResetTimer) clearTimeout(thanksAutoResetTimer);
+  thanksAutoResetTimer = setTimeout(resetForNextCustomer, 30000);
 }
 function dismissThanks() {
   const ov = $('#thanksOverlay');
   ov.classList.remove('open');
   ov.setAttribute('aria-hidden', 'true');
   setTimeout(() => { ov.hidden = true; }, 250);
+  if (thanksAutoResetTimer) { clearTimeout(thanksAutoResetTimer); thanksAutoResetTimer = null; }
+}
+
+/* "Continue as the SAME user" — keep clientId, keep table
+   label, just hide the thanks overlay and let the customer
+   browse the menu again. Their served orders stay in My Orders
+   as history; new orders will append. The reset lockout flips
+   back to false so a fresh round of "all served" will retrigger
+   the thanks card later. */
+function continueAsSameUser() {
+  dismissThanks();
+  closeMyOrders();
+  thanksShown = false;
+  bumpInactivity();
+  showToast('Welcome back ☕ Add anything else?', 'success');
 }
 function resetForNextCustomer() {
   // Forget this device's order history scope by clearing the
@@ -1056,7 +1093,8 @@ setInterval(() => {
   }
   bumpInactivity();
 }, 30 * 1000);
-$('#thanksDismissBtn').addEventListener('click', resetForNextCustomer);
+$('#thanksSameUserBtn').addEventListener('click', continueAsSameUser);
+$('#thanksNewUserBtn').addEventListener('click', resetForNextCustomer);
 
 /* ==========================================================
    MODAL HELPERS

@@ -1781,6 +1781,12 @@ body.cart-open .fab-cart {
   animation: thanksPop .35s ease;
 }
 .thanks-emoji { font-size: 3rem; line-height: 1; margin-bottom: 6px; }
+.thanks-actions {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 6px;
+}
+.thanks-hint { margin: 4px 0 0; font-size: .76rem; }
 @keyframes thanksPop {
   from { transform: scale(.9); opacity: 0; }
   to   { transform: scale(1); opacity: 1; }

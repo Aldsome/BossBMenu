@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=16" />
+  <link rel="stylesheet" href="style.css?v=17" />
 
   <script>
     (function () {
@@ -274,8 +274,15 @@
     <div class="thanks-card">
       <div class="thanks-emoji" aria-hidden="true">☕</div>
       <h3>Thanks for visiting!</h3>
-      <p class="muted">Your table will reset in a moment. Come back soon.</p>
-      <button class="btn btn-primary" id="thanksDismissBtn">Start a new order</button>
+      <p class="muted">How would you like to continue?</p>
+      <div class="thanks-actions">
+        <button class="btn btn-primary"   id="thanksSameUserBtn">Continue as same user</button>
+        <button class="btn btn-ghost"     id="thanksNewUserBtn">Continue as new user</button>
+      </div>
+      <p class="muted small thanks-hint">
+        Same user keeps your table label and order history.
+        New user clears everything for the next customer.
+      </p>
     </div>
   </div>
 
@@ -288,7 +295,7 @@
       <header class="modal-head">
         <h3>Already an open order here</h3>
       </header>
-      <p>
+      <p id="dupTableDesc">
         Looks like <strong id="dupTableLabel">—</strong> already has
         <span id="dupTableCount">an</span> open order on another device.
         Are you joining that table, or did you sit down somewhere else?
@@ -666,6 +673,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=1"></script>
   <script src="store.js?v=10"></script>
-  <script src="script.js?v=17"></script>
+  <script src="script.js?v=19"></script>
 </body>
 </html>
