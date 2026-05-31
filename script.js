@@ -152,10 +152,14 @@ function ensureTable() {
     setTableLabel(t);
     return;
   }
-  // Don't force the table prompt on a returning admin — they
-  // might just be reopening the panel.
+  // Authenticated admins skip the prompt entirely — their
+  // signed-in identity *is* the table label, so any order they
+  // place is tied to their staff name.
   const session = Store.getSession();
-  if (session && session.role === 'admin') return;
+  if (session && session.role === 'admin') {
+    setTableLabel(session.name || session.email);
+    return;
+  }
   openTableModal();
 }
 function openTableModal()  { openModal('#tableModal'); }
@@ -1008,26 +1012,50 @@ document.addEventListener('keydown', (e) => {
    ========================================================== */
 const staffLoginModal = $('#staffLoginModal');
 function openStaffLogin()  { openModal('#staffLoginModal'); }
-function closeStaffLogin() { closeModal('#staffLoginModal'); $('#staffLoginError').hidden = true; }
-/* Always present the login form when a staff button is clicked.
-   We used to fast-path into the panel if a session was cached,
-   but that surprised admins who expected to re-enter credentials
-   each time they tap "Staff Login" (it looked like a security
-   gap, not a convenience). Both buttons now route through the
-   form; the form's submit handler still uses the cached
-   credentials path if the user gives valid ones. */
-$('#openStaffLoginBtn').addEventListener('click', openStaffLogin);
+function closeStaffLogin() {
+  closeModal('#staffLoginModal');
+  $('#staffLoginError').hidden = true;
+  // Cancelling the staff login from the table flow leaves the
+  // customer with no table set AND no modal showing — they
+  // could browse the menu un-tabled, breaking the "always
+  // require table" rule. Reopen the table prompt unless a
+  // signed-in admin already exists.
+  const session = Store.getSession();
+  const isAdmin = !!session && session.role === 'admin';
+  if (!state.tableNumber && !isAdmin) {
+    openTableModal();
+  }
+}
+/* Footer button is dual-purpose: when no admin session is
+   active it opens Staff Login; when one IS active it signs
+   out instead — so a logged-in admin can never accidentally
+   "log in again" from the customer view. */
+$('#openStaffLoginBtn').addEventListener('click', () => {
+  if ($('#openStaffLoginBtn').dataset.mode === 'signout') {
+    adminSignOut();
+  } else {
+    openStaffLogin();
+  }
+});
 $('#tableStaffLoginBtn').addEventListener('click', () => {
   closeTableModal();
   openStaffLogin();
 });
 
 /* Header Admin shortcut — visible only when a staff session
-   is active. Click enters the admin panel directly. */
+   is active. Click enters the admin panel directly. Also
+   re-labels the footer Staff Login button so a signed-in
+   admin can sign out from the customer view instead of
+   accidentally trying to log in again. */
 function refreshAdminHeaderBtn() {
   const session = Store.getSession();
   const isAdmin = !!session && session.role === 'admin';
   $('#adminTopbarBtn').hidden = !isAdmin;
+  const footerBtn = $('#openStaffLoginBtn');
+  if (footerBtn) {
+    footerBtn.textContent = isAdmin ? 'Sign out' : 'Staff Login';
+    footerBtn.dataset.mode = isAdmin ? 'signout' : 'signin';
+  }
 }
 $('#adminTopbarBtn').addEventListener('click', () => {
   const session = Store.getSession();
@@ -1051,8 +1079,11 @@ $('#staffLoginForm').addEventListener('submit', async (e) => {
     closeStaffLogin();
     // If the table prompt was still up (admin signed in before
     // setting a table), dismiss it — admins aren't required to
-    // pick a table to access the panel.
+    // pick a table to access the panel. Auto-stamp the table
+    // label with their authenticated name so any order they
+    // place from the customer view is attributed to them.
     closeTableModal();
+    setTableLabel(session.name || session.email);
     enterAdminPanel(session);
   } catch (err) {
     errEl.textContent = err.message;
@@ -1085,9 +1116,17 @@ function exitAdminPanel()  {
   document.body.classList.remove('admin-open');
 }
 function adminSignOut() {
+  const wasSession = Store.getSession();
   Store.logout();
   exitAdminPanel();
   refreshAdminHeaderBtn();
+  // The auto-stamped admin-name table belongs to that session.
+  // Clearing it on sign-out drops the visitor back to the
+  // unauthenticated customer flow (forced table prompt).
+  if (wasSession && state.tableNumber === (wasSession.name || wasSession.email)) {
+    setTableLabel(null);
+    openTableModal();
+  }
   showToast('Signed out');
 }
 $('#exitAdminBtn').addEventListener('click', exitAdminPanel);
@@ -1396,7 +1435,64 @@ function loadSettingsForm() {
     if (el.type === 'checkbox') el.checked = !!v;
     else                        el.value   = v;
   });
+  refreshInviteCodeView();
 }
+
+function refreshInviteCodeView() {
+  const el = $('#inviteCodeView');
+  if (el) el.textContent = Store.getInviteCode();
+}
+
+$('#copyInviteBtn')?.addEventListener('click', async () => {
+  const code = Store.getInviteCode();
+  try {
+    await navigator.clipboard.writeText(code);
+    showAdminToast({ title: 'Invite code copied', variant: 'success' });
+  } catch {
+    // Clipboard API can fail on http:// — fall back to selection.
+    const sel = window.getSelection(), r = document.createRange();
+    r.selectNodeContents($('#inviteCodeView')); sel.removeAllRanges(); sel.addRange(r);
+    showAdminToast({ title: 'Selected — press Ctrl+C', variant: 'info' });
+  }
+});
+$('#rotateInviteBtn')?.addEventListener('click', () => {
+  if (!confirm('Rotate the invite code? Any pending invite links using the old code will stop working.')) return;
+  Store.rotateInviteCode();
+  refreshInviteCodeView();
+  showAdminToast({ title: 'New invite code generated', variant: 'success' });
+});
+
+/* Admin-only path to create another staff account from inside
+   the panel. Skips the invite code check because the caller is
+   already authenticated as admin. */
+$('#openAddStaffBtn')?.addEventListener('click', () => {
+  $('#addStaffError').hidden = true;
+  $('#addStaffForm').reset();
+  openModal('#addStaffModal');
+});
+$('#closeAddStaffBtn')?.addEventListener('click', () => closeModal('#addStaffModal'));
+bindBackdropClose('#addStaffModal', () => closeModal('#addStaffModal'));
+
+$('#addStaffForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('#addStaffError');
+  err.hidden = true;
+  const fd = new FormData(e.target);
+  try {
+    const account = await Store.registerAccount({
+      name:            fd.get('name'),
+      email:           fd.get('email'),
+      password:        fd.get('password'),
+      role:            'admin',
+      skipInviteCheck: true,
+    });
+    closeModal('#addStaffModal');
+    showAdminToast({ title: `Added ${account.name}`, variant: 'success' });
+  } catch (ex) {
+    err.textContent = ex.message || String(ex);
+    err.hidden = false;
+  }
+});
 $('#saveSettingsBtn').addEventListener('click', () => {
   const f = $('#settingsForm');
   const fd = new FormData(f);

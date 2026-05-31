@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BossB Coffee Shop — Create Staff Account</title>
+  <meta name="description" content="Create a new staff account for the BossB Coffee Shop admin panel." />
+  <meta name="theme-color" content="#A0855E" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=14" />
+
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('bossb-theme');
+        var theme = (saved === 'dark' || saved === 'light')
+          ? saved
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body class="register-body">
+
+  <main class="register-shell">
+    <div class="register-card">
+      <header class="register-head">
+        <span class="brand-mark lg">BB</span>
+        <h1>Create staff account</h1>
+        <p class="muted small">For BossB Coffee Shop admins. Each account gets full Admin Panel access.</p>
+      </header>
+
+      <form id="registerForm" class="auth-form" novalidate>
+        <label>Staff invite code
+          <input type="text" name="inviteCode" required autocomplete="off"
+                 placeholder="BB-XXXX-XXXX-XXXX"
+                 spellcheck="false" />
+          <small class="hint muted">Ask an existing admin for the current code.</small>
+        </label>
+        <label>Display name
+          <input type="text" name="name" required autocomplete="name" placeholder="Juan dela Cruz" />
+        </label>
+        <label>Email
+          <input type="email" name="email" required autocomplete="email" placeholder="staff@bossb.com" />
+        </label>
+        <label>Password
+          <input type="password" name="password" required minlength="8" autocomplete="new-password" />
+          <small class="hint muted">At least 8 characters.</small>
+        </label>
+        <label>Confirm password
+          <input type="password" name="confirm" required minlength="8" autocomplete="new-password" />
+        </label>
+
+        <p class="form-error" id="registerError" hidden></p>
+        <p class="form-success" id="registerSuccess" hidden></p>
+
+        <button type="submit" class="btn btn-primary btn-block" id="registerSubmitBtn">
+          Create account
+        </button>
+      </form>
+
+      <footer class="register-foot">
+        <a href="index.html" class="link-mini">← Back to ordering</a>
+        <a href="index.html?staff=1" class="link-mini">Already have an account? Sign in</a>
+      </footer>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" aria-live="polite"></div>
+
+  <script src="store.js?v=6"></script>
+  <script>
+    // Standalone registration flow — shares Store with the main
+    // app via localStorage. On success, the new account is written
+    // to bb_users (the same key the login form reads).
+    const $ = (s) => document.querySelector(s);
+    const form    = $('#registerForm');
+    const errEl   = $('#registerError');
+    const okEl    = $('#registerSuccess');
+    const submit  = $('#registerSubmitBtn');
+
+    // Make sure the default admin is present too — same boot
+    // sequence as the main app, so opening register.html cold
+    // still gives someone to sign in as.
+    Store.bootSeed().catch(() => {});
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errEl.hidden = true; okEl.hidden = true;
+      const fd = new FormData(form);
+      const password = fd.get('password');
+      const confirm  = fd.get('confirm');
+      if (password !== confirm) {
+        errEl.textContent = 'Passwords do not match.';
+        errEl.hidden = false; return;
+      }
+      submit.disabled = true; submit.textContent = 'Creating…';
+      try {
+        const account = await Store.registerAccount({
+          name:       fd.get('name'),
+          email:      fd.get('email'),
+          password,
+          role:       'admin',
+          inviteCode: fd.get('inviteCode'),
+        });
+        okEl.textContent = `Welcome, ${account.name}! Redirecting…`;
+        okEl.hidden = false;
+        form.reset();
+        setTimeout(() => { location.href = 'index.html?staff=1'; }, 900);
+      } catch (err) {
+        errEl.textContent = err.message || String(err);
+        errEl.hidden = false;
+      } finally {
+        submit.disabled = false; submit.textContent = 'Create account';
+      }
+    });
+  </script>
+</body>
+</html>

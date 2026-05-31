@@ -125,6 +125,7 @@ input[type="search"],
 input[type="tel"],
 input[type="date"],
 input[type="time"],
+input:not([type]),
 select,
 textarea {
   padding: 10px 13px;
@@ -136,6 +137,30 @@ textarea {
   font-size: .92rem;
   width: 100%;
   transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+  /* Always derive caret + selection from the inverted theme
+     vars so the text the user is typing is always readable
+     against the field background, in both themes. */
+  caret-color: var(--ink);
+}
+input::placeholder,
+textarea::placeholder { color: var(--ink-soft); opacity: .7; }
+input::selection,
+textarea::selection { background: rgba(160,133,94,.30); color: var(--ink); }
+
+/* Chrome / Edge autofill overrides our background with its own
+   yellow box — which destroys dark-mode contrast (yellow bg +
+   light text becomes unreadable). Force-paint our colors in by
+   leaning on the long-duration inset shadow trick (the
+   browser's autofill style targets background, not shadow). */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px var(--cream) inset;
+  -webkit-text-fill-color: var(--ink);
+  caret-color: var(--ink);
+  transition: background-color 9999s ease-in-out 0s;
 }
 input:hover, select:hover, textarea:hover { border-color: var(--line-strong); }
 input:focus, select:focus, textarea:focus {
@@ -1130,6 +1155,10 @@ code {
      stacking context. */
   overflow: hidden;
 }
+/* Suppresses the duplicate page-level scrollbar while the
+   admin panel is shown — the panel covers the viewport, so the
+   body scroll behind it is just visual noise. */
+body.admin-open { overflow: hidden; }
 .admin-topbar {
   display: flex;
   align-items: center;
@@ -1913,6 +1942,82 @@ body.cart-open .fab-cart {
   padding: 0 6px;
   font-weight: 600;
   color: var(--primary-deep);
+}
+
+/* ==========================================================
+   ADMIN — STAFF ACCESS  (invite code + add staff)
+   ========================================================== */
+.invite-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 10px 0 14px;
+}
+.invite-code {
+  flex: 1;
+  min-width: 220px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--brown-100);
+  color: var(--primary-deep);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 1rem;
+  letter-spacing: .04em;
+  font-weight: 600;
+  border: 1px dashed var(--brown-200);
+  user-select: all;
+}
+
+/* ==========================================================
+   REGISTER PAGE  (standalone register.html — staff signup)
+   ========================================================== */
+.register-body {
+  background: var(--cream);
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+.register-shell { width: 100%; max-width: 440px; }
+.register-card {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 28px 26px;
+  box-shadow: var(--shadow-lg);
+}
+.register-head {
+  text-align: center;
+  margin-bottom: 20px;
+  display: grid;
+  gap: 6px;
+}
+.register-head .brand-mark.lg {
+  margin: 0 auto;
+  width: 56px; height: 56px;
+  font-size: 1.4rem;
+  border-radius: 16px;
+}
+.register-head h1 {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  margin: 0;
+  color: var(--primary-deep);
+}
+.register-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.form-success {
+  color: #3A6E3B;
+  font-size: .88rem;
+  margin: 0;
 }
 
 /* ==========================================================

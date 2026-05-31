@@ -141,6 +141,21 @@ function writeJSON(key, value) {
   }
 }
 
+/* Best-effort fetch of a seed JSON file from disk. Returns null
+   if the file is missing or the page is opened via file:// (where
+   fetch is blocked by some browsers). Callers fall back to the
+   in-code DEFAULT_* constants in that case. */
+async function fetchJsonFile(path) {
+  try {
+    const res = await fetch(path, { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    console.warn(`[Store] could not load ${path}, using built-in defaults`, e);
+    return null;
+  }
+}
+
 /* ==========================================================
    STORE API
    ========================================================== */
@@ -408,6 +423,7 @@ const Store = {
     }
 
     users.push({
+      id:           'u_seed_admin',
       email:        SEED_EMAIL,
       passwordHash: expectedHash,
       name:         'Admin',
@@ -416,6 +432,82 @@ const Store = {
     });
     writeJSON(STORE_KEYS.users, users);
     console.info(`[Store] seeded default admin: ${SEED_EMAIL} / ${SEED_PASSWORD}`);
+  },
+
+  /* ==========================================================
+     BOOT SEED — runs once per page load. Pulls accounts and
+     products from data/*.json when localStorage is empty, so
+     the same JSON files double as a future-proof DB export
+     (importable into MySQL/MongoDB). seedIfEmpty() still runs
+     after to guarantee the default admin exists.
+     ========================================================== */
+  async bootSeed() {
+    if (!localStorage.getItem(STORE_KEYS.menu)) {
+      const seedMenu = await fetchJsonFile('data/products.json');
+      if (Array.isArray(seedMenu) && seedMenu.length) {
+        writeJSON(STORE_KEYS.menu, seedMenu);
+      }
+    }
+    if (!localStorage.getItem(STORE_KEYS.users)) {
+      const seedUsers = await fetchJsonFile('data/accounts.json');
+      if (Array.isArray(seedUsers) && seedUsers.length) {
+        writeJSON(STORE_KEYS.users, seedUsers);
+      }
+    }
+    await Store.seedIfEmpty();
+  },
+
+  /* Register a new account. Used by register.html (which must
+     include a valid inviteCode) and by the admin Settings
+     "Add staff" button (which calls with skipInviteCheck=true
+     because the caller is already an authenticated admin). */
+  async registerAccount({ email, name, password, role = 'admin', inviteCode, skipInviteCheck = false }) {
+    email = String(email || '').trim().toLowerCase();
+    name  = String(name  || '').trim();
+    if (!email || !name || !password) throw new Error('Missing field');
+    if (password.length < 8)          throw new Error('Password must be at least 8 characters');
+
+    if (!skipInviteCheck) {
+      const expected = Store.getInviteCode();
+      if (!inviteCode || String(inviteCode).trim() !== expected) {
+        throw new Error('Invalid invite code. Ask an existing admin for the current code.');
+      }
+    }
+
+    const users = await Store.getUsers();
+    if (users.some(u => u.email.toLowerCase() === email)) {
+      throw new Error('An account with that email already exists');
+    }
+    const passwordHash = await hashPassword(password);
+    const account = {
+      id:        'u_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      email,
+      name,
+      role,
+      passwordHash,
+      createdAt: new Date().toISOString(),
+    };
+    users.push(account);
+    writeJSON(STORE_KEYS.users, users);
+    return account;
+  },
+
+  /* Staff invite code — single shared secret existing admins
+     give to new hires so they can self-register. Generated on
+     first read so a stock install has a code, and rotatable any
+     time via Settings. */
+  getInviteCode() {
+    let code = localStorage.getItem('bb_invite_code');
+    if (!code) {
+      code = Store.rotateInviteCode();
+    }
+    return code;
+  },
+  rotateInviteCode() {
+    const chunk = () => Math.random().toString(36).slice(2, 6).toUpperCase();
+    const code  = `BB-${chunk()}-${chunk()}-${chunk()}`;
+    localStorage.setItem('bb_invite_code', code);
+    return code;
   },
 
   factoryReset() {

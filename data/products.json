@@ -1,0 +1,114 @@
+[
+  {
+    "id": "c1",
+    "name": "Classic Espresso",
+    "category": "coffee",
+    "price": 90,
+    "emoji": "☕",
+    "desc": "Bold double shot, rich crema.",
+    "tag": "Bestseller",
+    "img": "https://loremflickr.com/600/420/espresso%2Ccoffee?lock=101",
+    "options": { "size": true, "temp": false, "milk": false, "sugar": true }
+  },
+  {
+    "id": "c2",
+    "name": "Caramel Macchiato",
+    "category": "coffee",
+    "price": 130,
+    "emoji": "☕",
+    "desc": "Vanilla, caramel, layered milk.",
+    "img": "https://loremflickr.com/600/420/caramel%2Clatte?lock=102",
+    "options": { "size": true, "temp": true, "milk": true, "sugar": true }
+  },
+  {
+    "id": "c3",
+    "name": "Cafe Latte",
+    "category": "coffee",
+    "price": 120,
+    "emoji": "☕",
+    "desc": "Smooth espresso with steamed milk.",
+    "img": "https://loremflickr.com/600/420/latte%2Ccoffeeart?lock=103",
+    "options": { "size": true, "temp": true, "milk": true, "sugar": true }
+  },
+  {
+    "id": "c4",
+    "name": "Spanish Latte",
+    "category": "coffee",
+    "price": 135,
+    "emoji": "☕",
+    "desc": "Condensed milk + espresso.",
+    "img": "https://loremflickr.com/600/420/latte%2Ccoffee?lock=104",
+    "options": { "size": true, "temp": true, "milk": true, "sugar": true }
+  },
+  {
+    "id": "t1",
+    "name": "Matcha Latte",
+    "category": "tea",
+    "price": 140,
+    "emoji": "🍵",
+    "desc": "Ceremonial matcha, vanilla cream.",
+    "tag": "New",
+    "img": "https://loremflickr.com/600/420/matcha%2Cgreen%2Ctea?lock=201",
+    "options": { "size": true, "temp": true, "milk": true, "sugar": true }
+  },
+  {
+    "id": "t2",
+    "name": "Jasmine Green",
+    "category": "tea",
+    "price": 100,
+    "emoji": "🍵",
+    "desc": "Hand-picked jasmine blossoms.",
+    "img": "https://loremflickr.com/600/420/greentea%2Cteacup?lock=202",
+    "options": { "size": true, "temp": true, "milk": false, "sugar": true }
+  },
+  {
+    "id": "b1",
+    "name": "Cold Brew",
+    "category": "cold",
+    "price": 130,
+    "emoji": "🧊",
+    "desc": "12-hour steep, smooth.",
+    "img": "https://loremflickr.com/600/420/coldbrew%2Cicedcoffee?lock=301",
+    "options": { "size": true, "temp": false, "milk": true, "sugar": true }
+  },
+  {
+    "id": "b2",
+    "name": "Iced Caramel",
+    "category": "cold",
+    "price": 145,
+    "emoji": "🧊",
+    "desc": "Iced espresso with caramel.",
+    "img": "https://loremflickr.com/600/420/icedcoffee%2Ccaramel?lock=302",
+    "options": { "size": true, "temp": false, "milk": true, "sugar": true }
+  },
+  {
+    "id": "p1",
+    "name": "Butter Croissant",
+    "category": "pastry",
+    "price": 75,
+    "emoji": "🥐",
+    "desc": "Flaky, golden, baked daily.",
+    "img": "https://loremflickr.com/600/420/croissant%2Cbread?lock=401",
+    "options": { "size": false, "temp": false, "milk": false, "sugar": false }
+  },
+  {
+    "id": "p2",
+    "name": "Chocolate Cookie",
+    "category": "pastry",
+    "price": 55,
+    "emoji": "🍪",
+    "desc": "Gooey center, sea-salt finish.",
+    "img": "https://loremflickr.com/600/420/cookie%2Cchocolate?lock=402",
+    "options": { "size": false, "temp": false, "milk": false, "sugar": false }
+  },
+  {
+    "id": "p3",
+    "name": "Strawberry Tart",
+    "category": "pastry",
+    "price": 110,
+    "emoji": "🍰",
+    "desc": "Vanilla custard, fresh berries.",
+    "img": "https://loremflickr.com/600/420/tart%2Cstrawberry?lock=403",
+    "options": { "size": false, "temp": false, "milk": false, "sugar": false }
+  }
+]

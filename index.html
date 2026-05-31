@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=13" />
+  <link rel="stylesheet" href="style.css?v=14" />
 
   <script>
     (function () {
@@ -512,6 +512,24 @@
           </fieldset>
         </form>
 
+        <!-- Staff access controls. The invite code is what a new
+             hire needs to register at /register.html. Existing
+             admins can also create accounts directly here. -->
+        <div class="danger-card">
+          <h4>Staff access</h4>
+          <p class="muted small">
+            Share this code with new hires so they can sign up at
+            <code>register.html</code>. Anyone without the code can't register.
+            Rotate it any time to revoke pending invites.
+          </p>
+          <div class="invite-row">
+            <code id="inviteCodeView" class="invite-code">BB-XXXX-XXXX-XXXX</code>
+            <button class="btn btn-ghost"  id="copyInviteBtn">Copy</button>
+            <button class="btn btn-ghost"  id="rotateInviteBtn">Rotate</button>
+          </div>
+          <button class="btn btn-primary" id="openAddStaffBtn">+ Add staff account</button>
+        </div>
+
         <div class="danger-card">
           <h4>Data export</h4>
           <p class="muted small">
@@ -589,6 +607,33 @@
   </div>
 
   <!-- ==========================================================
+       ADD STAFF MODAL  (admin-only; bypasses the invite code
+       because the caller is already authenticated)
+       ========================================================== -->
+  <div class="modal" id="addStaffModal" aria-hidden="true">
+    <div class="modal-card auth-card" role="dialog" aria-labelledby="addStaffTitle">
+      <header class="modal-head">
+        <h3 id="addStaffTitle">Add staff account</h3>
+        <button class="icon-btn close-btn" id="closeAddStaffBtn" aria-label="Close">✕</button>
+      </header>
+      <form id="addStaffForm" class="auth-form">
+        <label>Display name
+          <input type="text" name="name" required autocomplete="name" />
+        </label>
+        <label>Email
+          <input type="email" name="email" required autocomplete="username" />
+        </label>
+        <label>Password
+          <input type="password" name="password" required minlength="8" autocomplete="new-password" />
+          <small class="hint muted">At least 8 characters. Share it with the staff member after creation.</small>
+        </label>
+        <p class="form-error" id="addStaffError" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block">Create account</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==========================================================
        RECEIPT MODAL  (admin)
        Renders a printable receipt for one order. The "Send to
        printer" button currently calls a stub — replace the body
@@ -618,7 +663,7 @@
        can include an Undo button — used for menu deletes. -->
   <div class="admin-toast-stack" id="adminToastStack" aria-live="polite"></div>
 
-  <script src="store.js?v=5"></script>
-  <script src="script.js?v=12"></script>
+  <script src="store.js?v=6"></script>
+  <script src="script.js?v=14"></script>
 </body>
 </html>

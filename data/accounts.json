@@ -1,0 +1,10 @@
+[
+  {
+    "id": "u_seed_admin",
+    "email": "admin@bossb.com",
+    "name": "Admin",
+    "role": "admin",
+    "passwordHash": "b4d7d0095660164c0bf697961ec96d25577f33cb1a5d17e91b42ceee806effa5",
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+]
