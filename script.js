@@ -313,6 +313,16 @@ $('#tableForm').addEventListener('submit', async (e) => {
   }
 });
 $('#changeTableBtn').addEventListener('click', () => {
+  // When an account is logged in (admin or, in future, a
+  // customer account) this button is "Log out" rather than
+  // "change" — the table label is the account identity, not a
+  // freely-editable guest name. adminSignOut() clears the
+  // session, drops the auto-stamped label, and re-prompts as a
+  // guest. For guests, keep the original change-table behavior.
+  if (Store.getSession()) {
+    adminSignOut();
+    return;
+  }
   $('#tableInput').value = state.tableNumber || '';
   openTableModal();
 });
@@ -1241,11 +1251,21 @@ $('#tableStaffLoginBtn').addEventListener('click', () => {
 function refreshAdminHeaderBtn() {
   const session = Store.getSession();
   const isAdmin = !!session && session.role === 'admin';
+  const loggedIn = !!session;          // any account (admin or future customer)
   $('#adminTopbarBtn').hidden = !isAdmin;
   const footerBtn = $('#openStaffLoginBtn');
   if (footerBtn) {
     footerBtn.textContent = isAdmin ? 'Sign out' : 'Staff Login';
     footerBtn.dataset.mode = isAdmin ? 'signout' : 'signin';
+  }
+  // Table-strip action: a logged-in account's table label IS
+  // their account identity, so they can't freely re-type it —
+  // the "change" link becomes "Log out" instead. Guests keep
+  // "change" so they can correct a typo'd table name.
+  const tableBtn = $('#changeTableBtn');
+  if (tableBtn) {
+    tableBtn.textContent     = loggedIn ? 'Log out' : 'change';
+    tableBtn.dataset.mode    = loggedIn ? 'logout' : 'change';
   }
 }
 $('#adminTopbarBtn').addEventListener('click', () => {
