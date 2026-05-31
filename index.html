@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=6" />
+  <link rel="stylesheet" href="style.css?v=7" />
 
   <script>
     (function () {
@@ -42,6 +42,12 @@
           </div>
         </div>
         <div class="topbar-actions">
+          <!-- Shown only when a staff session is active so admins
+               don't have to scroll to the footer Staff Login link. -->
+          <button class="admin-pill" id="adminTopbarBtn" hidden aria-label="Open admin panel">
+            <span class="admin-pill-dot" aria-hidden="true"></span>
+            Admin
+          </button>
           <button class="icon-btn theme-toggle" id="themeToggleBtn" aria-label="Toggle theme">
             <svg class="sun" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="4" fill="currentColor"/>
@@ -418,6 +424,6 @@
   <div class="toast" id="toast" aria-live="polite"></div>
 
   <script src="store.js?v=1"></script>
-  <script src="script.js?v=3"></script>
+  <script src="script.js?v=4"></script>
 </body>
 </html>

@@ -624,6 +624,18 @@ $('#openStaffLoginBtn').addEventListener('click', () => {
   if (session && session.role === 'admin') enterAdminPanel(session);
   else                                      openStaffLogin();
 });
+
+/* Header Admin shortcut — visible only when a staff session
+   is active. Click enters the admin panel directly. */
+function refreshAdminHeaderBtn() {
+  const session = Store.getSession();
+  const isAdmin = !!session && session.role === 'admin';
+  $('#adminTopbarBtn').hidden = !isAdmin;
+}
+$('#adminTopbarBtn').addEventListener('click', () => {
+  const session = Store.getSession();
+  if (session && session.role === 'admin') enterAdminPanel(session);
+});
 $('#closeStaffLoginBtn').addEventListener('click', closeStaffLogin);
 
 $('#staffLoginForm').addEventListener('submit', async (e) => {
@@ -658,11 +670,16 @@ function enterAdminPanel(session) {
   switchAdminTab('orders');
   renderOrders();
   loadSettingsForm();
+  refreshAdminHeaderBtn();
 }
-function exitAdminPanel()  { adminPanel.hidden = true; }
+function exitAdminPanel()  {
+  adminPanel.hidden = true;
+  refreshAdminHeaderBtn();
+}
 function adminSignOut() {
   Store.logout();
   exitAdminPanel();
+  refreshAdminHeaderBtn();
   showToast('Signed out');
 }
 $('#exitAdminBtn').addEventListener('click', exitAdminPanel);
@@ -951,6 +968,7 @@ async function boot() {
   renderMenu();
   updateCart();
   refreshOrdersBadge();
+  refreshAdminHeaderBtn();
 
   // Restore the customer's active order banner if they reload
   // mid-order. Polling resumes automatically.

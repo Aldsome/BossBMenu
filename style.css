@@ -290,7 +290,52 @@ select option,
   color: var(--ink-soft);
   font-size: .76rem;
 }
-.topbar-actions { display: flex; gap: 8px; }
+.topbar-actions { display: flex; gap: 8px; align-items: center; }
+
+/* Admin shortcut in the header — appears when a staff
+   session is active so admins don't have to scroll down to
+   the footer's "Staff Login" link. */
+.admin-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--brown-100);
+  border: 1px solid var(--brown-200);
+  color: var(--primary-deep);
+  font-family: inherit;
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .12s;
+}
+.admin-pill:hover {
+  background: var(--brown-200);
+  transform: translateY(-1px);
+}
+.admin-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3A6E3B;
+  box-shadow: 0 0 0 2px rgba(58, 110, 59, 0.18);
+  animation: adminDotPulse 2s ease-in-out infinite;
+}
+@keyframes adminDotPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .55; }
+}
+[data-theme="dark"] .admin-pill {
+  background: var(--brown-100);
+  border-color: var(--brown-200);
+  color: var(--brown-700);
+}
+[data-theme="dark"] .admin-pill-dot { background: #7EB78A; }
+
+@media (max-width: 420px) {
+  .admin-pill { padding: 6px 10px; font-size: .8rem; }
+}
 
 .theme-toggle .sun, .theme-toggle .moon { width: 18px; height: 18px; }
 .theme-toggle .moon { display: none; }
