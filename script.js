@@ -1416,17 +1416,21 @@ function renderOrders() {
     return `
       <article class="order-card" data-id="${o.id}" data-status="${o.status}">
         <header class="order-head">
-          <h3>#${o.number}</h3>
-          <span class="table-tag" title="Table">
-            <span class="table-tag-label">Table</span>
-            <strong>${tableLabel}</strong>
-          </span>
-          <span class="status-pill status-${o.status}">${o.status}</span>
-          ${cancellable
-            ? `<span class="cancellable-badge" title="Customer can still cancel">
-                 ⏱ cancellable <span data-cancel-countdown="${o.id}">${secs}s</span>
-               </span>`
-            : ''}
+          <div class="order-head-id">
+            <h3>#${o.number}</h3>
+            <span class="table-tag" title="Table">
+              <span class="table-tag-label">Table</span>
+              <strong>${tableLabel}</strong>
+            </span>
+          </div>
+          <div class="order-head-status">
+            <span class="status-pill status-${o.status}">${o.status}</span>
+            ${cancellable
+              ? `<span class="cancellable-badge" title="Customer can still cancel">
+                   ⏱ cancellable <span data-cancel-countdown="${o.id}">${secs}s</span>
+                 </span>`
+              : ''}
+          </div>
         </header>
         <div class="order-meta">placed ${placedAgo}</div>
         <ul>${itemsHtml}</ul>

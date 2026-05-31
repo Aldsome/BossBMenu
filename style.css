@@ -1314,10 +1314,28 @@ body.admin-open { overflow: hidden; }
 }
 .order-card .order-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+/* Left cluster: order number with the table tag stacked
+   directly beneath it, so the table label reads as belonging
+   to that order rather than floating in the middle. */
+.order-card .order-head-id {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+/* Right cluster: status pill (+ cancellable badge) stays pinned
+   to the top-right of the card header. */
+.order-card .order-head-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .order-card .order-head h3 {
   font-family: var(--font-display);
