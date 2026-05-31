@@ -61,7 +61,7 @@ const DEFAULT_MENU = [
     options: { size: true, temp: true, milk: true, sugar: true } },
   { id: 'c4', name: 'Spanish Latte',     category: 'coffee', price: 135, emoji: '☕',
     desc: 'Condensed milk + espresso.',
-    img: img('latte,spanish', 104),
+    img: img('latte,coffee', 104),
     options: { size: true, temp: true, milk: true, sugar: true } },
 
   { id: 't1', name: 'Matcha Latte',      category: 'tea',    price: 140, emoji: '🍵',
@@ -197,16 +197,13 @@ const Store = {
     const orders = Store.getOrders();
     const o = orders.find(x => x.id === orderId);
     if (!o) return false;
-    const prev = o.status;
     o.status = status;
     if (status === 'served') o.servedAt = new Date().toISOString();
     Store.setOrders(orders);
-    Store.pushLog({
-      type:    'order_status',
-      status,
-      message: `Order #${o.number} (${o.tableNumber || '—'}): ${prev} → ${status}`,
-      orderId: o.id,
-    });
+    // Intentional: no log entry. Admin-initiated status changes
+    // already produce a toast — the bell log is for events the
+    // admin needs to be notified about (incoming orders,
+    // customer cancellations), not their own actions.
     return true;
   },
 
@@ -267,24 +264,13 @@ const Store = {
   },
 
   deleteOrder(orderId) {
-    const o = Store.getOrders().find(x => x.id === orderId);
-    const ok = Store.setOrders(Store.getOrders().filter(x => x.id !== orderId));
-    if (o) Store.pushLog({
-      type:    'order_delete',
-      message: `Order #${o.number} (${o.tableNumber || '—'}) deleted`,
-      orderId: o.id,
-    });
-    return ok;
+    // Admin-initiated; toast suffices. No log entry.
+    return Store.setOrders(Store.getOrders().filter(x => x.id !== orderId));
   },
 
   clearServedOrders() {
-    const n = Store.getOrders().filter(o => o.status === 'served').length;
-    const ok = Store.setOrders(Store.getOrders().filter(o => o.status !== 'served'));
-    if (n > 0) Store.pushLog({
-      type:    'order_delete',
-      message: `Cleared ${n} served order${n === 1 ? '' : 's'}`,
-    });
-    return ok;
+    // Admin-initiated bulk; toast suffices. No log entry.
+    return Store.setOrders(Store.getOrders().filter(o => o.status !== 'served'));
   },
 
   /* Per-browser anonymous id. Generated on first call and
@@ -327,22 +313,19 @@ const Store = {
     return idx === -1 ? log.length : idx;
   },
 
-  /* Menu upsert/delete with log entries so the admin can see
-     "Saved 'Latte'" / "Deleted 'Cookie'" in their feed. */
+  /* Menu helpers — kept as thin wrappers so callers don't change.
+     Admin-initiated saves/adds are confirmed by toast; only deletes
+     produce a log entry so the admin can find them later if they
+     want to undo from the bell. */
   upsertMenuItemLogged(item) {
-    const existing = Store.getMenu().find(m => m.id === item.id);
     Store.upsertMenuItem(item);
-    Store.pushLog({
-      type:    existing ? 'menu_save' : 'menu_add',
-      message: `${existing ? 'Updated' : 'Added'} menu item "${item.name}"`,
-    });
   },
   deleteMenuItemLogged(id) {
     const existing = Store.getMenu().find(m => m.id === id);
     Store.deleteMenuItem(id);
     if (existing) Store.pushLog({
       type:    'menu_delete',
-      message: `Deleted menu item "${existing.name}"`,
+      message: `Deleted "${existing.name}"`,
       undo:    { kind: 'menu_item', item: existing },
     });
   },

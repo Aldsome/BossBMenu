@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=10" />
 
   <script>
     (function () {
@@ -397,7 +397,22 @@
     <main class="admin-content">
       <!-- ----- Orders ----- -->
       <section class="admin-pane" data-admin-pane="orders">
-        <div class="pane-head">
+        <!-- Today's revenue strip — counts only orders SERVED today. -->
+        <div class="day-stats" id="dayStats">
+          <div class="day-stat">
+            <small>Today's revenue</small>
+            <strong id="dayRevenue">₱0</strong>
+          </div>
+          <div class="day-stat">
+            <small>Served today</small>
+            <strong id="dayServed">0</strong>
+          </div>
+          <div class="day-stat">
+            <small>Active now</small>
+            <strong id="dayActive">0</strong>
+          </div>
+        </div>
+        <div class="pane-head sticky">
           <h2>Active Orders</h2>
           <div class="row-gap">
             <select id="orderFilter">
@@ -517,7 +532,7 @@
        can include an Undo button — used for menu deletes. -->
   <div class="admin-toast-stack" id="adminToastStack" aria-live="polite"></div>
 
-  <script src="store.js?v=2"></script>
-  <script src="script.js?v=6"></script>
+  <script src="store.js?v=3"></script>
+  <script src="script.js?v=7"></script>
 </body>
 </html>

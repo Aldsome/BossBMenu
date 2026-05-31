@@ -189,12 +189,21 @@ $('#dupTableElsewhereBtn').addEventListener('click', () => {
 
 $('#tableForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  const label = $('#tableInput').value.trim();
-  if (!label) return;
+  const input = $('#tableInput');
+  const label = input.value.trim();
+  if (!label) {
+    // Reinforce HTML5 required — input.required already blocks
+    // submit but show a friendlier hint in case styling hid it.
+    input.setCustomValidity('Please enter a table name or number.');
+    input.reportValidity();
+    input.setCustomValidity('');
+    return;
+  }
   checkDuplicateTable(label, () => {
     setTableLabel(label);
     localStorage.setItem('bossb_table', label);
     closeTableModal();
+    bumpInactivity();
   });
 });
 $('#changeTableBtn').addEventListener('click', () => {
@@ -415,6 +424,14 @@ function buildOpts(container, list, currentId, onPick) {
 }
 
 function openCustomizer(itemId, opts = {}) {
+  // Hard gate: no customizing / adding without a table label.
+  // Send the customer back to the table prompt — they can't
+  // build a cart while the table is empty.
+  if (!state.tableNumber) {
+    showToast('Please enter your table first', 'error');
+    openTableModal();
+    return;
+  }
   const item = MENU.find(m => m.id === itemId);
   if (!item) return;
   const o = item.options || {};
@@ -831,11 +848,42 @@ function resetForNextCustomer() {
   clearActiveOrder();
   localStorage.removeItem('bossb_table');
   setTableLabel(null);
+  clearCart();
   closeMyOrders();
   dismissThanks();
-  // Next interaction will re-prompt for a table (handled by
-  // the Place Order flow / ensureTable).
+  // Force the customer back to the table prompt — they cannot
+  // start ordering again without picking a table.
+  openTableModal();
 }
+
+/* ==========================================================
+   INACTIVITY RESET
+   - If the customer hasn't interacted with the page for
+     INACTIVITY_MS, AND they have no in-flight orders, we
+     consider them gone and reset to the table prompt.
+   - Customers waiting on a drink are never kicked out.
+   ========================================================== */
+const INACTIVITY_MS = 5 * 60 * 1000;
+let inactivityDeadline = Date.now() + INACTIVITY_MS;
+function bumpInactivity() { inactivityDeadline = Date.now() + INACTIVITY_MS; }
+['click', 'touchstart', 'keydown', 'scroll', 'pointerdown'].forEach(ev =>
+  document.addEventListener(ev, bumpInactivity, { passive: true })
+);
+setInterval(() => {
+  if (Date.now() < inactivityDeadline) return;
+  // Don't disturb customers who have orders in flight — they're
+  // still on the premises waiting for food.
+  if (getMyActiveOrders().length > 0) { bumpInactivity(); return; }
+  // Don't double-fire while the table modal is already open.
+  if ($('#tableModal').classList.contains('open')) { bumpInactivity(); return; }
+  // Nothing to lose — wipe and prompt.
+  if (state.tableNumber || state.cart.length > 0) {
+    resetForNextCustomer();
+  } else {
+    openTableModal();
+  }
+  bumpInactivity();
+}, 30 * 1000);
 $('#thanksDismissBtn').addEventListener('click', resetForNextCustomer);
 
 /* ==========================================================
@@ -968,6 +1016,28 @@ function refreshOrdersBadge() {
   $('#ordersBadge').textContent = active;
 }
 
+/* Day-of stats strip at the top of the Orders pane. Revenue
+   counts only orders SERVED today (matches what's actually
+   been collected at the counter). */
+function refreshDayStats() {
+  const orders = Store.getOrders();
+  const now    = new Date();
+  const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+  const sameDay = (iso) => {
+    if (!iso) return false;
+    const t = new Date(iso);
+    return t.getFullYear() === y && t.getMonth() === m && t.getDate() === d;
+  };
+
+  const servedToday = orders.filter(o => o.status === 'served' && sameDay(o.servedAt));
+  const revenue     = servedToday.reduce((s, o) => s + (o.total || 0), 0);
+  const active      = orders.filter(o => o.status === 'pending' || o.status === 'preparing').length;
+
+  $('#dayRevenue').textContent = peso(revenue);
+  $('#dayServed').textContent  = servedToday.length;
+  $('#dayActive').textContent  = active;
+}
+
 function renderOrders() {
   const filter = $('#orderFilter').value;
   let orders = Store.getOrders();
@@ -1024,6 +1094,7 @@ function renderOrders() {
     `;
   }).join('');
   refreshOrdersBadge();
+  refreshDayStats();
 }
 
 $('#orderFilter').addEventListener('change', renderOrders);
@@ -1235,9 +1306,7 @@ $('#saveSettingsBtn').addEventListener('click', () => {
   Store.setConfig(patch);
   CONFIG = Store.getConfig();
   applyConfigToDOM();
-  Store.pushLog({ type: 'menu_save', message: 'Shop settings updated' });
   showAdminToast({ title: 'Settings saved', variant: 'success' });
-  refreshAdminActivity();
 });
 
 $('#resetMenuBtn').addEventListener('click', () => {
@@ -1305,10 +1374,7 @@ function showAdminToast({ title, variant = 'info', undo = null, ttl = 6000 }) {
    ========================================================== */
 const LOG_ICON = {
   order_placed:  '🧾',
-  order_status:  '↻',
-  order_delete:  '🗑',
-  menu_add:      '➕',
-  menu_save:     '✎',
+  order_status:  '✕',   // only fired for customer-initiated cancels now
   menu_delete:   '🗑',
 };
 
@@ -1331,15 +1397,46 @@ function renderBellList() {
     host.innerHTML = `<p class="empty-state">No activity yet.</p>`;
     return;
   }
-  host.innerHTML = log.map(e => `
-    <div class="bell-row" data-type="${e.type}">
-      <span class="bell-row-icon" aria-hidden="true">${LOG_ICON[e.type] || '•'}</span>
-      <div class="bell-row-body">
-        <div>${escapeHtml(e.message)}</div>
-        <small class="muted">${timeAgo(new Date(e.ts))}</small>
+  host.innerHTML = log.map(e => {
+    const jumpable = !!e.orderId;
+    return `
+      <div class="bell-row ${jumpable ? 'jumpable' : ''}"
+           data-type="${e.type}"
+           data-log-id="${e.id}"
+           ${jumpable ? `data-jump-order="${e.orderId}"` : ''}>
+        <span class="bell-row-icon" aria-hidden="true">${LOG_ICON[e.type] || '•'}</span>
+        <div class="bell-row-body">
+          <div>${escapeHtml(e.message)}</div>
+          <small class="muted">${timeAgo(new Date(e.ts))}</small>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
+}
+
+/* Click a notification → switch to Orders, scroll the matching
+   card into view, flash it briefly. Non-order entries (menu
+   deletes) silently close the dropdown. */
+$('#bellList').addEventListener('click', (e) => {
+  const row = e.target.closest('.bell-row');
+  if (!row) return;
+  const orderId = row.dataset.jumpOrder;
+  $('#bellDropdown').hidden = true;
+  if (!orderId) return;
+  switchAdminTab('orders');
+  // renderOrders runs synchronously inside switchAdminTab; wait
+  // one frame so the new DOM is laid out before we scroll.
+  requestAnimationFrame(() => flashOrderCard(orderId));
+});
+
+function flashOrderCard(orderId) {
+  const card = $(`.order-card[data-id="${orderId}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.remove('flash');     // restart animation if mid-flash
+  void card.offsetWidth;              // force reflow
+  card.classList.add('flash');
+  setTimeout(() => card.classList.remove('flash'), 2400);
 }
 
 function toggleBellDropdown() {
