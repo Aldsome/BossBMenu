@@ -3672,7 +3672,7 @@ function renderChatMessages() {
       <div class="chat-msg ${mine ? 'mine' : 'theirs'}">
         ${(!mine) ? `<small class="chat-who">${escapeHtml(m.senderName || (m.role === 'admin' ? 'Staff' : 'Guest'))}</small>` : ''}
         <div class="chat-bubble chat-${m.kind}">${inner}</div>
-        <small class="chat-time">${timeAgo(new Date(m.ts))}</small>
+        <small class="chat-time">${timeAgo(new Date(m.ts), Store.serverNow ? Store.serverNow() : Date.now())}</small>
       </div>`;
   }).join('');
   body.scrollTop = body.scrollHeight;
@@ -3908,13 +3908,13 @@ async function copyTextToClipboard(text) {
     }
   }
 }
-function timeAgo(d) {
+function timeAgo(d, now = Date.now()) {
   const t = (d instanceof Date) ? d.getTime() : new Date(d).getTime();
   if (isNaN(t)) return '';
-  // Clamp to 0: nothing is in the future. Guards against minor clock
-  // skew between two devices (a message stamped on a slightly-fast
-  // phone would otherwise read as a negative "ago").
-  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  // Clamp to 0: nothing is in the future. Callers pass a server-
+  // referenced `now` (Store.serverNow()) for cross-device data like
+  // chat, so a device whose own clock is off doesn't skew the label.
+  const s = Math.max(0, Math.floor((now - t) / 1000));
   if (s < 5)     return 'just now';
   if (s < 60)    return `${s}s ago`;
   if (s < 3600)  return `${Math.floor(s / 60)}m ago`;

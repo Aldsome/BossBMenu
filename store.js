@@ -337,6 +337,39 @@ const MSG_TO_ROW = (m) => ({
   size_bytes:  m.sizeBytes || 0,
   created_at:  m.ts,
 });
+
+/* ----------------------------------------------------------------
+   SERVER CLOCK OFFSET
+   Relative chat times ("x ago") must not depend on the local device
+   clock — a customer phone running a few minutes fast would show
+   every freshly-arrived message as "3 min ago". We track the gap
+   between this device and the DB server and expose a server-
+   referenced "now". The offset is refreshed opportunistically every
+   time we observe a freshly-created server timestamp (a message we
+   just sent, or one arriving live), with a best-effort HTTP-header
+   sync at boot so it's already close before the first message.
+   ---------------------------------------------------------------- */
+let serverClockOffset = 0;
+const observeServerTime = (iso) => {
+  if (!iso) return;
+  const t = new Date(toIsoTs(iso)).getTime();
+  if (!isNaN(t)) serverClockOffset = t - Date.now();
+};
+async function syncServerClock() {
+  if (!REMOTE_MODE || typeof fetch !== 'function' || !navigator.onLine) return;
+  try {
+    const t0  = Date.now();
+    const res = await fetch(SUPABASE_URL + '/rest/v1/', {
+      method: 'HEAD', headers: { apikey: SUPABASE_KEY }, cache: 'no-store',
+    });
+    const t1  = Date.now();
+    const hdr = res.headers.get('date');           // may be hidden by CORS
+    if (!hdr) return;
+    const server = new Date(hdr).getTime();
+    if (isNaN(server)) return;
+    serverClockOffset = server - (t0 + (t1 - t0) / 2);  // midpoint of round-trip
+  } catch (e) { /* offline / header not exposed — opportunistic sync covers it */ }
+}
 const ROW_TO_LOG = (r) => r && ({
   id:      r.id,
   type:    r.type,
@@ -1040,7 +1073,7 @@ const Store = {
       const { data, error } = await sb.from('bb_messages')
         .insert(row).select('created_at').single();
       if (error) { console.warn('[Store] message insert failed', error); throw error; }
-      if (data && data.created_at) msg.ts = toIsoTs(data.created_at);
+      if (data && data.created_at) { msg.ts = toIsoTs(data.created_at); observeServerTime(data.created_at); }
       if (kind !== 'text') Store.pruneMedia();   // keep media under cap
     } else {
       const all = readJSON('bb_chat_local', []);
@@ -1304,6 +1337,7 @@ const Store = {
     }
 
     await Store.seedIfEmpty();
+    syncServerClock();            // best-effort clock alignment (non-blocking)
     Store._wireRealtime();
   },
 
@@ -1389,6 +1423,7 @@ const Store = {
     // doesn't go through _dispatchSync).
     sb.channel('bb_messages_changes')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bb_messages' }, (payload) => {
+        observeServerTime(payload.new && payload.new.created_at);   // fresh insert ≈ server "now"
         window.dispatchEvent(new CustomEvent('bb-chat', { detail: { message: ROW_TO_MSG(payload.new) } }));
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'bb_messages' }, (payload) => {
@@ -1551,6 +1586,11 @@ Store.isRemote = () => REMOTE_MODE;
 Store.getSyncState = () => ({ ...syncState });
 Store.onSyncChange = (fn) => { syncListeners.add(fn); fn(syncState); return () => syncListeners.delete(fn); };
 Store.flushPending = flushPending;
+/* Server-referenced "now" for relative timestamps that must agree
+   across devices (chat). Falls back to the device clock until the
+   first server time is observed. */
+Store.serverNow = () => Date.now() + serverClockOffset;
+Store.syncServerClock = syncServerClock;
 window.Store = Store;
 window.DEFAULT_MENU = DEFAULT_MENU;
 window.DEFAULT_CONFIG = DEFAULT_CONFIG;
