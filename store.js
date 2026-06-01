@@ -45,11 +45,10 @@ const SESSION_TABLE_TTL_MS = 24 * 60 * 60 * 1000;
    same label at the same time, even before either has ordered. */
 const ACTIVE_SESSION_TTL_MS = 30 * 60 * 1000;
 
-/* Customer self-cancel grace window. During this period after
-   placing, the customer sees a Cancel button in their orders
-   popup — no admin involvement required. After it expires,
-   only staff can cancel. */
-const CANCEL_WINDOW_MS = 60 * 1000;
+/* Customer self-cancel rule: a customer can cancel their own
+   order any time it is still `pending` — i.e. until staff start
+   it by marking it `preparing`. No time limit. Once it's
+   preparing/served, only staff can cancel. */
 
 /* Combined cap for chat media (images + voice notes) stored
    inline in bb_messages. ~10% of the Supabase free DB (500 MB).
@@ -682,7 +681,7 @@ const Store = {
   /* Modify the items on an order that hasn't started yet. Allowed
      only while still 'pending' (before the kitchen marks it
      preparing). Recomputes the total and re-syncs. Used by both the
-     customer "Modify" flow (within the grace window) and the admin
+     customer "Modify" flow (while still pending) and the admin
      order editor. */
   updateOrderItems(orderId, items, notes) {
     const orders = Store.getOrders();
@@ -723,14 +722,13 @@ const Store = {
   },
 
   /* Customer-initiated cancel. Only succeeds while the order is
-     still pending AND within the grace window. Returns the order
-     so the caller can restore the items into the cart. */
+     still pending (staff haven't started preparing it). Returns
+     the order so the caller can restore the items into the cart. */
   customerCancelOrder(orderId) {
     const orders = Store.getOrders();
     const o = orders.find(x => x.id === orderId);
     if (!o)                       return { ok: false, reason: 'not_found' };
     if (o.status !== 'pending')   return { ok: false, reason: 'already_started' };
-    if (!Store.isCancellableByCustomer(o)) return { ok: false, reason: 'window_expired' };
     o.status = 'cancelled';
     o.cancelledBy = 'customer';
     o.cancelledAt = new Date().toISOString();
@@ -739,24 +737,16 @@ const Store = {
     Store.pushLog({
       type:    'order_status',
       status:  'cancelled',
-      message: `Order #${o.number} cancelled by customer (within grace window)`,
+      message: `Order #${o.number} cancelled by customer (before preparing)`,
       orderId: o.id,
     });
     return { ok: true, order: o };
   },
 
+  /* A customer may cancel/modify their own order until staff start
+     it. Status-based, no time window. */
   isCancellableByCustomer(order) {
-    if (!order || order.status !== 'pending') return false;
-    const placed = new Date(order.placedAt).getTime();
-    return (Date.now() - placed) < CANCEL_WINDOW_MS;
-  },
-
-  /* Milliseconds remaining until the grace window expires, or 0
-     if it already has / the order isn't pending. */
-  cancelWindowRemaining(order) {
-    if (!order || order.status !== 'pending') return 0;
-    const placed = new Date(order.placedAt).getTime();
-    return Math.max(0, CANCEL_WINDOW_MS - (Date.now() - placed));
+    return !!order && order.status === 'pending';
   },
 
   /* All orders this browser has placed that haven't been
@@ -1537,4 +1527,3 @@ Store.flushPending = flushPending;
 window.Store = Store;
 window.DEFAULT_MENU = DEFAULT_MENU;
 window.DEFAULT_CONFIG = DEFAULT_CONFIG;
-window.CANCEL_WINDOW_MS = CANCEL_WINDOW_MS;

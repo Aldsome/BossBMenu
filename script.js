@@ -1037,8 +1037,8 @@ $('#placeOrderBtn').addEventListener('click', async () => {
 });
 
 /* Customer "Modify" — pull a still-pending order's items back into
-   the cart and switch the cart into update mode. Shares the same
-   grace window as Cancel (only offered while cancellable). */
+   the cart and switch the cart into update mode. Available on the
+   same terms as Cancel (only while the order is still pending). */
 function startEditingOrder(order) {
   clearCart();
   state.editingOrderId = order.id;
@@ -1191,32 +1191,25 @@ function updatePlacedModalForOrder(order) {
   refreshPlacedCancelBtn(order);
 }
 
-/* Toggle and label the customer's self-cancel button. Visible
-   only while the order is still pending AND within the grace
-   window. The countdown ticks down via a 1s interval that runs
-   only while the modal is open with a pending order. */
+/* Toggle the customer's self-cancel button. Visible while the
+   order is still pending; the only thing that closes it is staff
+   marking the order `preparing`. A light 1s poll hides the button
+   the moment that happens (e.g. via realtime) while the modal is
+   open. */
 let placedCancelTicker = null;
 function refreshPlacedCancelBtn(order) {
   const btn = $('#placedCancelBtn');
-  if (!order || !Store.isCancellableByCustomer(order)) {
-    btn.hidden = true;
-    if (placedCancelTicker) { clearInterval(placedCancelTicker); placedCancelTicker = null; }
-    return;
-  }
-  const tick = () => {
+  const stop = () => { if (placedCancelTicker) { clearInterval(placedCancelTicker); placedCancelTicker = null; } };
+  if (!order) { btn.hidden = true; stop(); return; }
+  const sync = () => {
     const fresh = Store.getOrders().find(o => o.id === order.id);
-    if (!fresh || !Store.isCancellableByCustomer(fresh)) {
-      btn.hidden = true;
-      if (placedCancelTicker) { clearInterval(placedCancelTicker); placedCancelTicker = null; }
-      return;
-    }
-    const secs = Math.ceil(Store.cancelWindowRemaining(fresh) / 1000);
-    $('#placedCancelCountdown').textContent = secs + 's';
+    const ok = Store.isCancellableByCustomer(fresh);
+    btn.hidden = !ok;
+    if (!ok) stop();
   };
-  btn.hidden = false;
-  tick();
-  if (placedCancelTicker) clearInterval(placedCancelTicker);
-  placedCancelTicker = setInterval(tick, 1000);
+  sync();
+  stop();
+  if (!btn.hidden) placedCancelTicker = setInterval(sync, 1000);
 }
 
 $('#placedCancelBtn').addEventListener('click', () => {
@@ -1225,13 +1218,9 @@ $('#placedCancelBtn').addEventListener('click', () => {
   if (!confirm('Cancel this order? You can re-order any time.')) return;
   const result = Store.customerCancelOrder(orderId);
   if (!result.ok) {
-    if (result.reason === 'already_started') {
-      showToast('Already being prepared — please ask staff.', 'error');
-    } else if (result.reason === 'window_expired') {
-      showToast('Cancel window expired — please ask staff.', 'error');
-    } else {
-      showToast('Could not cancel.', 'error');
-    }
+    showToast(result.reason === 'already_started'
+      ? 'Already being prepared — please ask staff.'
+      : 'Could not cancel.', 'error');
     refreshOrderStatusBanner();
     renderMyOrdersList();
     return;
@@ -1257,7 +1246,7 @@ $('#orderStatusBtn').addEventListener('click', () => {
    - FAB shows live count of THIS device's pending/preparing.
    - Popup is scrollable, shows every order this device placed,
      and exposes the customer self-cancel button per order while
-     the grace window is open.
+     the order is still pending.
    - When every order is served and there's nothing pending,
      show the thank-you overlay and clear the table.
    ========================================================== */
@@ -1515,7 +1504,6 @@ function renderMyOrdersList() {
     // Only the customer who placed an order can cancel it — a
     // tablemate's order is read-only in your view.
     const cancellable = isMine && Store.isCancellableByCustomer(o);
-    const secs = Math.ceil(Store.cancelWindowRemaining(o) / 1000);
     return `
       <article class="myorder-item" data-id="${o.id}" data-status="${o.status}">
         <header>
@@ -1533,12 +1521,8 @@ function renderMyOrdersList() {
           <span class="myorder-status-icon" aria-hidden="true">${info.icon}</span>
           <span class="myorder-status-text">${info.text}</span>
           ${cancellable
-            ? `<button class="btn btn-ghost btn-modify-grace" data-act="modify">
-                 Modify <span class="cancel-countdown">${secs}s</span>
-               </button>
-               <button class="btn btn-cancel-grace" data-act="cancel">
-                 Cancel <span class="cancel-countdown">${secs}s</span>
-               </button>`
+            ? `<button class="btn btn-ghost btn-modify-grace" data-act="modify">Modify</button>
+               <button class="btn btn-cancel-grace" data-act="cancel">Cancel</button>`
             : ''}
         </footer>
       </article>
@@ -1598,7 +1582,7 @@ $('#myOrdersList').addEventListener('click', async (e) => {
     const order = Store.getOrders().find(o => o.id === id);
     if (!order) return;
     if (!Store.isCancellableByCustomer(order)) {
-      showToast('Modify window expired — ask staff.', 'error');
+      showToast('Already being prepared — ask staff.', 'error');
       renderMyOrdersList();
       return;
     }
@@ -1611,9 +1595,7 @@ $('#myOrdersList').addEventListener('click', async (e) => {
     const result = Store.customerCancelOrder(id);
     if (!result.ok) {
       showToast(
-        result.reason === 'already_started' ? 'Already being prepared — ask staff.' :
-        result.reason === 'window_expired'  ? 'Cancel window expired — ask staff.'  :
-        'Could not cancel.',
+        result.reason === 'already_started' ? 'Already being prepared — ask staff.' : 'Could not cancel.',
         'error'
       );
     } else {
@@ -2120,7 +2102,6 @@ function renderOrders() {
     `).join('');
     const tableLabel = o.tableNumber ? escapeHtml(String(o.tableNumber)) : '—';
     const cancellable = Store.isCancellableByCustomer(o);
-    const secs = Math.ceil(Store.cancelWindowRemaining(o) / 1000);
     return `
       <article class="order-card${orderSelectMode ? ' selectable' : ''}" data-id="${o.id}" data-status="${o.status}">
         <header class="order-head">
@@ -2135,8 +2116,8 @@ function renderOrders() {
           <div class="order-head-status">
             <span class="status-pill status-${o.status}">${o.status}</span>
             ${cancellable
-              ? `<span class="cancellable-badge" title="Customer can still cancel">
-                   ⏱ cancellable <span data-cancel-countdown="${o.id}">${secs}s</span>
+              ? `<span class="cancellable-badge" title="Customer can still cancel until you mark it preparing">
+                   ⏱ cancellable
                  </span>`
               : ''}
           </div>
@@ -2326,26 +2307,6 @@ setInterval(() => {
   if (adminPanel.hidden) return;
   reactToAdminOrderChanges();
 }, 3000);
-
-/* Live-tick the cancellable countdown badges every second so
-   admins see exactly when the customer's self-cancel window
-   closes. Cheaper than re-rendering — we only update the span
-   text. Skips work entirely when the panel isn't visible. */
-setInterval(() => {
-  if (adminPanel.hidden) return;
-  if ($('.admin-tab.active').dataset.adminTab !== 'orders') return;
-  let needsRerender = false;
-  $$('[data-cancel-countdown]').forEach(el => {
-    const id    = el.dataset.cancelCountdown;
-    const order = Store.getOrders().find(o => o.id === id);
-    if (!order || !Store.isCancellableByCustomer(order)) {
-      needsRerender = true;
-      return;
-    }
-    el.textContent = Math.ceil(Store.cancelWindowRemaining(order) / 1000) + 's';
-  });
-  if (needsRerender) renderOrders();
-}, 1000);
 
 /* ----- Menu admin table ----- */
 /* Admin menu view state: which category is filtered, whether rows

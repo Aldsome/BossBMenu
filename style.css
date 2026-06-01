@@ -2358,16 +2358,6 @@ body.cart-open .fab-cart {
   gap: 8px;
 }
 .btn-cancel-grace:hover { background: var(--danger-deep); }
-.cancel-countdown {
-  display: inline-block;
-  padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.22);
-  border-radius: 999px;
-  font-size: .78rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
 /* ==========================================================
    CUSTOMER — THANK-YOU OVERLAY
    ========================================================== */
