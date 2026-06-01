@@ -56,6 +56,25 @@ let CONFIG = Store.getConfig();
 const peso = (n) => `${CONFIG.currency}${Number(n).toFixed(2)}`;
 const getOpt = (list, id) => list.find(o => o.id === id);
 
+/* Thumbnail markup — show the product image when present; the emoji
+   only appears as a fallback when there is NO image (or it fails to
+   load), so it never overlays a real photo. The fallback starts
+   hidden whenever an image exists and is revealed by the img's
+   onerror handler. */
+function thumbMarkup(item, opts = {}) {
+  const cls     = opts.fallbackClass || 'ph-fallback';
+  const extra   = opts.fallbackStyle || '';
+  const loading = opts.loading || 'lazy';
+  const emoji   = (item && item.emoji) || '☕';
+  if (item && item.img) {
+    const hide = ['display:none', extra].filter(Boolean).join(';');
+    return `<img src="${item.img}" alt="${escapeHtml(opts.alt || '')}" loading="${loading}" `
+      + `onerror="this.style.display='none';var f=this.parentNode.querySelector('.${cls}');if(f)f.style.display='';">`
+      + `<span class="${cls}" style="${hide}">${emoji}</span>`;
+  }
+  return `<span class="${cls}"${extra ? ` style="${extra}"` : ''}>${emoji}</span>`;
+}
+
 /* ----- Option groups (built-in + admin-defined custom) -----
    The four built-ins keep their bespoke choice lists; custom groups
    come from Store.getOptionGroups(). optionDefs() unifies them so the
@@ -569,9 +588,7 @@ function renderMenu() {
   menuGrid.innerHTML = items.map(item => `
     <article class="product-card" data-id="${item.id}">
       <div class="placeholder-img" aria-hidden="true">
-        <img src="${item.img || ''}" alt="${escapeHtml(item.name)}" loading="lazy"
-             onerror="this.style.display='none'">
-        <span class="ph-fallback">${item.emoji || '☕'}</span>
+        ${thumbMarkup(item, { alt: item.name })}
       </div>
       <div class="product-body">
         ${item.tag ? `<span class="tag">${escapeHtml(item.tag)}</span>` : ''}
@@ -715,8 +732,7 @@ function updateCart() {
       return `
         <div class="cart-item" data-key="${line.lineKey}">
           <div class="thumb">
-            <img src="${item.img || ''}" alt="" loading="lazy" onerror="this.style.display='none'">
-            <span>${item.emoji || '☕'}</span>
+            ${thumbMarkup(item)}
           </div>
           <div>
             <div class="title">${escapeHtml(item.name)}</div>
@@ -878,10 +894,7 @@ function openCustomizer(itemId, opts = {}) {
   $('#czName').textContent      = item.name;
   $('#czDesc').textContent      = item.desc;
   $('#czBasePrice').textContent = `Base ${peso(item.price)}`;
-  $('#czImage').innerHTML = `
-    <img src="${item.img || ''}" alt="" loading="eager" onerror="this.style.display='none'">
-    <span class="ph-fallback" style="font-size:2rem">${item.emoji || '☕'}</span>
-  `;
+  $('#czImage').innerHTML = thumbMarkup(item, { loading: 'eager', fallbackStyle: 'font-size:2rem' });
   $('#czAddLabel').textContent = opts.editLineKey ? 'Save changes' : 'Add to cart';
   $('#czTitle').textContent    = opts.editLineKey ? 'Edit item'    : 'Customize';
 
@@ -1496,9 +1509,7 @@ function renderMyOrdersList() {
     const selectable = myOrdersSelectMode && isMine && (o.status === 'served' || o.status === 'cancelled');
     const itemsHtml = o.items.map(i => {
       const menuItem = MENU.find(m => m.id === i.itemId);
-      const img   = menuItem && menuItem.img;
-      const emoji = (menuItem && menuItem.emoji) || '☕';
-      const thumb = `<span class="myo-thumb">${img ? `<img src="${img}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}<span class="myo-thumb-ph">${emoji}</span></span>`;
+      const thumb = `<span class="myo-thumb">${thumbMarkup(menuItem, { fallbackClass: 'myo-thumb-ph' })}</span>`;
       return `<li>${thumb}<span class="myo-name">${i.qty}× ${escapeHtml(i.name)}</span><span class="myo-price">${peso(i.unitPrice * i.qty)}</span></li>`;
     }).join('');
     // Only the customer who placed an order can cancel it — a
