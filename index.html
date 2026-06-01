@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=38" />
+  <link rel="stylesheet" href="style.css?v=39" />
 
   <script>
     (function () {
@@ -367,6 +367,21 @@
   </div>
 
   <!-- ==========================================================
+       "STILL THERE?" PROMPT  (idle check — only shown to a guest
+       with nothing going on: no cart, no orders in flight)
+       ========================================================== -->
+  <div class="modal" id="afkModal" aria-hidden="true">
+    <div class="modal-card small-card" role="dialog" aria-labelledby="afkTitle">
+      <header class="modal-head"><h3 id="afkTitle">Still there? 👀</h3></header>
+      <p>You've been idle for a bit. We'll free your table for the next
+         guest in <strong id="afkCountdown">45</strong>s if you've stepped away.</p>
+      <div class="form-actions">
+        <button class="btn btn-primary btn-block" id="afkStayBtn">I'm still here</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================
        DUPLICATE TABLE PROMPT  (shown when the entered table
        label already has an active order from another device)
        ========================================================== -->
@@ -651,6 +666,16 @@
               <span>Item prices already include tax (VAT-inclusive)</span>
             </label>
           </fieldset>
+
+          <fieldset>
+            <legend>Chat</legend>
+            <label class="check-inline">
+              <input type="checkbox" name="allowGuestChat" />
+              <span>Allow guest-to-guest chat
+                <small class="muted">(off: guests message staff only; tablemates can't chat each other)</small>
+              </span>
+            </label>
+          </fieldset>
         </form>
 
         <!-- Staff access controls. The invite code is what a new
@@ -866,7 +891,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=1"></script>
-  <script src="store.js?v=28"></script>
-  <script src="script.js?v=53"></script>
+  <script src="store.js?v=29"></script>
+  <script src="script.js?v=54"></script>
 </body>
 </html>

@@ -889,6 +889,7 @@ body.chat-open .fab-chat { opacity: 0; pointer-events: none; }
   }
   .chat-drawer.open { transform: translateX(0); }
 }
+.chat-status-live { color: var(--success, #3A6E3B); font-weight: 600; }
 .chat-body {
   flex: 1 1 auto;
   overflow-y: auto;

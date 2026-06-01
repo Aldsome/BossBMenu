@@ -1776,29 +1776,64 @@ function resetForNextCustomer() {
    ========================================================== */
 const INACTIVITY_MS = 5 * 60 * 1000;
 let inactivityDeadline = Date.now() + INACTIVITY_MS;
-function bumpInactivity() { inactivityDeadline = Date.now() + INACTIVITY_MS; }
+function bumpInactivity() {
+  inactivityDeadline = Date.now() + INACTIVITY_MS;
+  // Any interaction means the guest is back — dismiss the idle prompt.
+  if ($('#afkModal') && $('#afkModal').classList.contains('open')) hideAfkPrompt();
+}
 ['click', 'touchstart', 'keydown', 'scroll', 'pointerdown'].forEach(ev =>
   document.addEventListener(ev, bumpInactivity, { passive: true })
 );
+
+/* A guest is "engaged" — and so NEVER timed out — whenever something
+   is going on: items sitting in the cart, or an order still in
+   flight (pending/preparing). AFK only ever targets a guest with a
+   table but nothing happening. An actively browsing guest also stays
+   alive because scrolling/tapping keeps bumping the deadline; their
+   live session heartbeat keeps them the owner of their table name. */
+function customerIsEngaged() {
+  return state.cart.length > 0 || getMyActiveOrders().length > 0;
+}
+
+/* "Still there?" idle prompt with a grace countdown. We confirm
+   before freeing the table so we never yank an order/cart out from
+   under someone who just looked away briefly. */
+const AFK_GRACE_MS = 45 * 1000;
+let afkPromptTimer = null, afkDeadline = 0;
+function showAfkPrompt() {
+  const modal = $('#afkModal');
+  if (!modal || modal.classList.contains('open')) return;
+  afkDeadline = Date.now() + AFK_GRACE_MS;
+  openModal('#afkModal');
+  const tick = () => {
+    const left = Math.max(0, Math.ceil((afkDeadline - Date.now()) / 1000));
+    const el = $('#afkCountdown'); if (el) el.textContent = left;
+    if (left <= 0) { hideAfkPrompt(); resetForNextCustomer(); }
+  };
+  tick();
+  afkPromptTimer = setInterval(tick, 1000);
+}
+function hideAfkPrompt() {
+  if (afkPromptTimer) { clearInterval(afkPromptTimer); afkPromptTimer = null; }
+  closeModal('#afkModal');
+}
+$('#afkStayBtn').addEventListener('click', () => { hideAfkPrompt(); bumpInactivity(); });
+
 setInterval(() => {
   if (Date.now() < inactivityDeadline) return;
-  // Signed-in admins are never timed out — they're staff, not
-  // walk-in customers. Their session expiry is handled by the
-  // 8-hour bb_session TTL in store.js instead.
+  // Signed-in admins are never timed out — staff, not walk-ins.
   const session = Store.getSession();
   if (session && session.role === 'admin') { bumpInactivity(); return; }
-  // Don't disturb customers who have orders in flight — they're
-  // still on the premises waiting for food.
-  if (getMyActiveOrders().length > 0) { bumpInactivity(); return; }
-  // Don't double-fire while the table modal is already open.
+  // Engaged guests (cart items or orders in flight) are immune.
+  if (customerIsEngaged()) { bumpInactivity(); return; }
+  // Don't fight a modal that's already up.
   if ($('#tableModal').classList.contains('open')) { bumpInactivity(); return; }
-  // Nothing to lose — wipe and prompt.
-  if (state.tableNumber || state.cart.length > 0) {
-    resetForNextCustomer();
-  } else {
-    openTableModal();
-  }
-  bumpInactivity();
+  if ($('#afkModal').classList.contains('open')) return;     // already prompting
+  // Never even started (no table) → just nudge to the table prompt.
+  if (!state.tableNumber) { openTableModal(); bumpInactivity(); return; }
+  // Has a table but nothing going on → confirm presence before
+  // abolishing the room and freeing the name for the next guest.
+  showAfkPrompt();
 }, 30 * 1000);
 $('#thanksSameUserBtn').addEventListener('click', continueAsSameUser);
 $('#thanksNewUserBtn').addEventListener('click', resetForNextCustomer);
@@ -2803,7 +2838,8 @@ $('#saveSettingsBtn').addEventListener('click', () => {
   }
   // Checkboxes only appear in FormData when checked, so we read
   // them directly to capture the off state too.
-  patch.taxInclusive = f.elements.taxInclusive?.checked || false;
+  patch.taxInclusive   = f.elements.taxInclusive?.checked || false;
+  patch.allowGuestChat = f.elements.allowGuestChat?.checked || false;
   Store.setConfig(patch);
   CONFIG = Store.getConfig();
   applyConfigToDOM();
@@ -3647,7 +3683,8 @@ async function openChat(thread, role = 'customer') {
     if (!adminPanel.hidden) renderOrders();
   }
   $('#chatTitle').textContent    = role === 'admin' ? `Table ${thread}` : 'Chat with staff';
-  $('#chatSubtitle').textContent = role === 'admin' ? 'reply to this table' : 'ask about your order';
+  updateChatStatus();              // sets the default subtitle
+  startChatPresence(thread, role);
   chatDrawer.classList.add('open');
   chatDrawer.setAttribute('aria-hidden', 'false');
   document.body.classList.add('chat-open');
@@ -3657,25 +3694,122 @@ async function openChat(thread, role = 'customer') {
   renderChatMessages();
   markChatSeen(thread);
   refreshChatDot();
+  syncChatToViewport(true);
 }
 function closeChat() {
   chatDrawer.classList.remove('open');
   chatDrawer.setAttribute('aria-hidden', 'true');
   document.body.classList.remove('chat-open');
   setChatReply(null);
+  stopChatPresence();
+  syncChatToViewport(false);          // revert any keyboard sizing
   if (chatThread) markChatSeen(chatThread);
   refreshChatDot();
 }
 $('#closeChatBtn').addEventListener('click', closeChat);
 $('#fabChatBtn').addEventListener('click', () => openChat(state.tableNumber, 'customer'));
 
+/* ----- Presence + typing ("Active now" / "typing…") -----------
+   Identity-based and role-agnostic: the same code drives every
+   pairing (admin↔client, client↔client). "Other" = any participant
+   whose clientId differs from mine; the typing label comes from the
+   sender's own name, so it reads correctly regardless of who's who. */
+let presenceLeave = null, otherPresent = false, otherTyping = false, typingName = '', typingClearTimer = null, lastTypingSent = 0;
+function updateChatStatus() {
+  const sub = $('#chatSubtitle');
+  if (!sub) return;
+  if (otherTyping)  { sub.textContent = `${typingName || 'Someone'} is typing…`; sub.classList.add('chat-status-live'); return; }
+  if (otherPresent) { sub.textContent = 'Active now';                             sub.classList.add('chat-status-live'); return; }
+  sub.classList.remove('chat-status-live');
+  sub.textContent = chatRole === 'admin' ? 'reply to this table' : 'ask about your order';
+}
+function startChatPresence(thread, role) {
+  stopChatPresence();
+  if (!Store.joinChatPresence) return;
+  presenceLeave = Store.joinChatPresence({
+    thread, role,
+    name: role === 'admin' ? (Store.getSession()?.name || 'Staff') : (state.tableNumber || 'Guest'),
+    onPresence: (pstate, selfId) => {
+      const everyone = Object.values(pstate || {}).flat();
+      // Count a participant as "other" only if visible to us (admins,
+      // or guests when guest-to-guest chat is enabled).
+      otherPresent = everyone.some(p => p && p.id && p.id !== selfId && (chatShowsGuests() || p.role === 'admin'));
+      updateChatStatus();
+    },
+    onTyping: (p, selfId) => {
+      if (!p || p.id === selfId) return;           // ignore our own pings
+      if (!(chatShowsGuests() || p.role === 'admin')) return;   // hidden guest
+      otherTyping = true;
+      typingName = p.name || (p.role === 'admin' ? 'Staff' : 'Guest');
+      updateChatStatus();
+      clearTimeout(typingClearTimer);
+      typingClearTimer = setTimeout(() => { otherTyping = false; updateChatStatus(); }, 2500);
+    },
+  });
+}
+function stopChatPresence() {
+  if (presenceLeave) { presenceLeave(); presenceLeave = null; }
+  clearTimeout(typingClearTimer);
+  otherPresent = false; otherTyping = false; typingName = '';
+}
+$('#chatInput').addEventListener('input', () => {
+  const now = Date.now();
+  if (Store.sendTyping && now - lastTypingSent > 1400) { Store.sendTyping(); lastTypingSent = now; }
+});
+
+/* ----- Mobile keyboard handling ------------------------------
+   On phones the on-screen keyboard shrinks the VISUAL viewport but
+   not the layout viewport, so a bottom-anchored fixed drawer gets
+   shoved under the keyboard and the page jitters as the focused
+   input is scrolled into view. We pin the drawer to the visual
+   viewport instead: when the keyboard is up, lift the drawer above
+   it and fill the visible height (it sits in the top area so the
+   conversation stays readable); when the keyboard is down, revert
+   to the CSS bottom-sheet. Desktop side-drawer is left untouched. */
+function syncChatToViewport(scrollToEnd) {
+  const drawer = $('#chatDrawer');
+  if (!drawer) return;
+  const vv = window.visualViewport;
+  const mobile = window.innerWidth < 800;
+  const reset = () => { drawer.style.bottom = ''; drawer.style.height = ''; drawer.style.maxHeight = ''; };
+  if (!vv || !mobile || !drawer.classList.contains('open')) { reset(); return; }
+  const kbInset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  if (kbInset > 100) {                 // keyboard is up
+    drawer.style.bottom    = kbInset + 'px';
+    drawer.style.height    = vv.height + 'px';
+    drawer.style.maxHeight = vv.height + 'px';
+  } else {
+    reset();
+  }
+  if (scrollToEnd) { const b = $('#chatBody'); if (b) b.scrollTop = b.scrollHeight; }
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => syncChatToViewport(true));
+  window.visualViewport.addEventListener('scroll', () => syncChatToViewport(false));
+}
+$('#chatInput').addEventListener('focus', () => setTimeout(() => syncChatToViewport(true), 120));
+
+/* Whether the current viewer may see/interact with other GUESTS in
+   the thread. Admins always can; guests only when the admin has
+   enabled guest-to-guest chat. Drives both message visibility and
+   presence/typing so the toggle behaves consistently. */
+function chatShowsGuests() {
+  return chatRole === 'admin' || !!(CONFIG && CONFIG.allowGuestChat);
+}
+function chatVisibleMessages() {
+  if (chatShowsGuests()) return chatMessages;
+  const myId = Store.getClientId();
+  return chatMessages.filter(m => m.role === 'admin' || m.sender === myId);
+}
+
 function renderChatMessages() {
   const body = $('#chatBody');
-  if (!chatMessages.length) {
+  const list = chatVisibleMessages();
+  if (!list.length) {
     body.innerHTML = `<p class="empty-state">No messages yet. Say hi 👋</p>`;
     return;
   }
-  body.innerHTML = chatMessages.map(m => {
+  body.innerHTML = list.map(m => {
     const mine = (chatRole === 'admin') ? (m.role === 'admin') : (m.role === 'customer' && m.sender === Store.getClientId());
     let inner;
     if (m.kind === 'image')      inner = `<img class="chat-img" src="${m.body}" alt="photo" />`;

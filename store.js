@@ -71,6 +71,11 @@ const DEFAULT_CONFIG = {
   taxRate:     12,             // percent
   taxInclusive:true,
   taxLabel:    'VAT',
+  /* Chat: when false (default), guests can only message staff — a
+     tablemate's messages are hidden from other guests and don't drive
+     their presence/typing. Admins always see the full thread. Flip on
+     in Settings to allow open guest-to-guest table chat. */
+  allowGuestChat: false,
   businessName:'BossB Coffee Shop',
   businessAddr:'123 Sample St, Quezon City',
   businessTin: '',             // PH BIR Tax Identification Number
@@ -1632,6 +1637,46 @@ Store.flushPending = flushPending;
    first server time is observed. */
 Store.serverNow = () => Date.now() + serverClockOffset;
 Store.syncServerClock = syncServerClock;
+
+/* ----------------------------------------------------------------
+   CHAT PRESENCE + TYPING  (ephemeral, no table needed)
+   Uses a Supabase Realtime channel per thread: presence tracks who
+   is currently viewing the thread ("Active now"), and a broadcast
+   event carries lightweight "typing…" pings. Both are transient —
+   nothing is persisted, so no schema/RLS changes are required.
+   ---------------------------------------------------------------- */
+let _presenceCh = null, _presenceSelf = null;
+Store.leaveChatPresence = () => {
+  if (_presenceCh) { try { sb.removeChannel(_presenceCh); } catch (e) {} _presenceCh = null; }
+  _presenceSelf = null;
+};
+/* Identity-based (NOT role-based) so behaviour is identical for every
+   pairing — admin↔client, client↔admin, client↔client. The presence
+   key + the `id` carried on presence/typing is this device's stable
+   clientId; "other" is simply anyone whose id differs from mine. */
+Store.joinChatPresence = ({ thread, role, name, onPresence, onTyping } = {}) => {
+  if (!REMOTE_MODE || !thread) return () => {};
+  Store.leaveChatPresence();
+  const selfId = Store.getClientId();
+  _presenceSelf = { id: selfId, role, name };
+  const ch = sb.channel('chat-presence:' + thread, { config: { presence: { key: selfId } } });
+  ch.on('presence', { event: 'sync' }, () => {
+    try { onPresence && onPresence(ch.presenceState(), selfId); } catch (e) {}
+  });
+  ch.on('broadcast', { event: 'typing' }, ({ payload }) => {
+    try { onTyping && onTyping(payload || {}, selfId); } catch (e) {}
+  });
+  ch.subscribe(async (status) => {
+    if (status === 'SUBSCRIBED') { try { await ch.track({ id: selfId, role, name, at: Date.now() }); } catch (e) {} }
+  });
+  _presenceCh = ch;
+  return () => Store.leaveChatPresence();
+};
+Store.sendTyping = () => {
+  if (_presenceCh && _presenceSelf) {
+    try { _presenceCh.send({ type: 'broadcast', event: 'typing', payload: { ..._presenceSelf, at: Date.now() } }); } catch (e) {}
+  }
+};
 window.Store = Store;
 window.DEFAULT_MENU = DEFAULT_MENU;
 window.DEFAULT_CONFIG = DEFAULT_CONFIG;
