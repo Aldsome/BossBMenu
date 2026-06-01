@@ -927,6 +927,42 @@ body.chat-open .fab-chat { opacity: 0; pointer-events: none; }
 .chat-img   { display: block; max-width: 220px; border-radius: 11px; }
 .chat-audio { display: block; width: 230px; max-width: 60vw; }
 
+/* Voice message — Messenger-style waveform + scrub. */
+.voice-msg {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(62vw, 250px);
+}
+.voice-play {
+  flex: none;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: grid; place-items: center;
+  background: rgba(0, 0, 0, .07);
+  color: inherit;
+}
+.chat-msg.mine .voice-play { background: rgba(255, 255, 255, .25); }
+.voice-play svg { width: 16px; height: 16px; display: block; }
+.voice-wave-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  height: 30px;
+  cursor: pointer;
+  touch-action: none;        /* we own horizontal drags (scrub) */
+}
+.voice-wave { display: block; width: 100%; height: 100%; }
+.voice-time {
+  flex: none;
+  min-width: 30px;
+  text-align: right;
+  font-size: .7rem;
+  opacity: .8;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Gestures: let the browser scroll vertically; we handle horizontal
    swipe-to-reply ourselves. */
 .chat-msg { touch-action: pan-y; }

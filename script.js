@@ -3702,6 +3702,7 @@ function closeChat() {
   document.body.classList.remove('chat-open');
   setChatReply(null);
   stopChatPresence();
+  if (activeVoiceId) { const a = voiceAudioEls.get(activeVoiceId); if (a) a.pause(); }
   syncChatToViewport(false);          // revert any keyboard sizing
   if (chatThread) markChatSeen(chatThread);
   refreshChatDot();
@@ -3813,7 +3814,7 @@ function renderChatMessages() {
     const mine = (chatRole === 'admin') ? (m.role === 'admin') : (m.role === 'customer' && m.sender === Store.getClientId());
     let inner;
     if (m.kind === 'image')      inner = `<img class="chat-img" src="${m.body}" alt="photo" />`;
-    else if (m.kind === 'audio') inner = `<audio class="chat-audio" controls src="${m.body}"></audio>`;
+    else if (m.kind === 'audio') inner = voiceMsgMarkup(m, mine);
     else                         inner = `<span>${escapeHtml(m.body)}</span>`;
     const replyHtml = m.replyTo
       ? `<div class="chat-reply-quote">${escapeHtml(m.replyPreview || 'message')}</div>` : '';
@@ -3826,8 +3827,247 @@ function renderChatMessages() {
         <small class="chat-time">${timeAgo(new Date(m.ts), Store.serverNow ? Store.serverNow() : Date.now())}</small>
       </div>`;
   }).join('');
+  initVoicePlayers();
   body.scrollTop = body.scrollHeight;
 }
+
+/* ============================================================
+   VOICE MESSAGE PLAYER  (Messenger-style waveform + scrub)
+   - Waveform: decode the data-URL once via Web Audio, reduce to
+     WF_BARS RMS amplitude bars + an ACCURATE duration; cache both
+     per message id (re-renders are then free).
+   - Playback: a persistent HTMLAudioElement per id kept in JS
+     memory (never in the DOM) so it survives the chat's innerHTML
+     rebuilds and keeps playing; the canvas re-binds to it.
+   - Sync: audio events are the source of truth; one rAF loop
+     redraws only the active player for smooth progress.
+   ============================================================ */
+const WF_BARS = 48;
+const voiceAudioEls = new Map();   // id -> HTMLAudioElement (persists)
+const voicePeaks    = new Map();   // id -> Float32Array | 'pending'
+const voiceDur      = new Map();   // id -> accurate seconds (from decode)
+let   _wfAudioCtx   = null;
+let   activeVoiceId = null;
+let   wfRaf         = null;
+const PLAY_ICON  = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>`;
+const PAUSE_ICON = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>`;
+
+function voiceMsgMarkup(m, mine) {
+  return `<div class="voice-msg ${mine ? 'mine-voice' : 'their-voice'}" data-id="${m.id}" role="group" aria-label="Voice message">
+            <button class="voice-play" aria-label="Play">${PLAY_ICON}</button>
+            <div class="voice-wave-wrap"><canvas class="voice-wave"></canvas></div>
+            <span class="voice-time">0:00</span>
+          </div>`;
+}
+function fmtClock(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function voiceEl(id) { return document.querySelector(`#chatBody .voice-msg[data-id="${id}"]`); }
+function wfAudioCtx() { if (!_wfAudioCtx) { const C = window.AudioContext || window.webkitAudioContext; _wfAudioCtx = C ? new C() : null; } return _wfAudioCtx; }
+
+/* Round-rect path with a fallback for older canvas impls. */
+function wfRoundRect(ctx, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/* Decode → RMS bars + accurate duration. Cached; safe to call many times. */
+async function computeVoicePeaks(id, src) {
+  if (voicePeaks.has(id)) return;
+  voicePeaks.set(id, 'pending');
+  try {
+    const ctx = wfAudioCtx();
+    if (!ctx) throw new Error('no AudioContext');
+    const arrBuf = await fetch(src).then(r => r.arrayBuffer());
+    const audioBuf = await ctx.decodeAudioData(arrBuf);
+    voiceDur.set(id, audioBuf.duration);
+    const ch = audioBuf.getChannelData(0);
+    const block = Math.max(1, Math.floor(ch.length / WF_BARS));
+    const peaks = new Float32Array(WF_BARS);
+    let max = 1e-4;
+    for (let i = 0; i < WF_BARS; i++) {
+      let sum = 0, n = 0;
+      const start = i * block;
+      for (let j = 0; j < block && start + j < ch.length; j++) { const v = ch[start + j]; sum += v * v; n++; }
+      const rms = Math.sqrt(sum / (n || 1));
+      peaks[i] = rms; if (rms > max) max = rms;
+    }
+    for (let i = 0; i < WF_BARS; i++) peaks[i] = Math.min(1, peaks[i] / max);
+    voicePeaks.set(id, peaks);
+  } catch (e) {
+    voicePeaks.set(id, voiceFallbackPeaks());   // graceful: a gentle static shape
+  }
+  // Redraw whatever element currently shows this id (survives any
+  // re-render that happened while we were decoding).
+  const cur = voiceEl(id);
+  if (cur) { drawVoice(cur); const a = voiceAudioEls.get(id); if (a) updateVoiceTime(cur, a); }
+}
+function voiceFallbackPeaks() {
+  const p = new Float32Array(WF_BARS);
+  for (let i = 0; i < WF_BARS; i++) p[i] = 0.3 + 0.45 * Math.abs(Math.sin(i * 0.7));
+  return p;
+}
+
+let _wfAccent = '';
+function wfAccentColor() {
+  if (!_wfAccent) _wfAccent = (getComputedStyle(document.documentElement).getPropertyValue('--primary') || '#C18F1E').trim();
+  return _wfAccent;
+}
+
+function drawVoice(el) {
+  if (!el) return;
+  const id = el.dataset.id;
+  const wrap = el.querySelector('.voice-wave-wrap');
+  const canvas = el.querySelector('.voice-wave');
+  if (!wrap || !canvas) return;
+  const a = voiceAudioEls.get(id);
+  const dur = voiceDur.get(id) || (a && isFinite(a.duration) ? a.duration : 0);
+  const ratio = (a && dur) ? Math.min(1, Math.max(0, a.currentTime / dur)) : 0;
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth || 160, h = wrap.clientHeight || 30;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const peaks = voicePeaks.get(id);
+  const arr = (peaks && peaks !== 'pending') ? peaks : null;
+  const mine = el.classList.contains('mine-voice');
+  const playedColor = mine ? '#ffffff' : wfAccentColor();
+  const restColor   = mine ? 'rgba(255,255,255,.45)' : 'rgba(0,0,0,.18)';
+  const gap = 2;
+  const bw = Math.max(2, (w - (WF_BARS - 1) * gap) / WF_BARS);
+  for (let i = 0; i < WF_BARS; i++) {
+    const v = arr ? arr[i] : 0.4;
+    const bh = Math.max(2, v * (h - 4));
+    const x = i * (bw + gap);
+    ctx.fillStyle = (((i + 0.5) / WF_BARS) <= ratio) ? playedColor : restColor;
+    wfRoundRect(ctx, x, (h - bh) / 2, bw, bh, bw / 2);
+    ctx.fill();
+  }
+}
+function updateVoiceTime(el, a) {
+  const t = el && el.querySelector('.voice-time');
+  if (!t || !a) return;
+  const dur = voiceDur.get(el.dataset.id) || (isFinite(a.duration) ? a.duration : 0);
+  const show = (!a.paused || a.currentTime > 0.05) ? a.currentTime : dur;
+  t.textContent = fmtClock(show);
+}
+function syncVoiceBtn(el, a) {
+  const b = el && el.querySelector('.voice-play');
+  if (!b || !a) return;
+  const playing = !a.paused && !a.ended;
+  b.innerHTML = playing ? PAUSE_ICON : PLAY_ICON;
+  b.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  el.classList.toggle('playing', playing);
+}
+
+function wfLoop() {
+  wfRaf = null;
+  if (!activeVoiceId) return;
+  const a = voiceAudioEls.get(activeVoiceId);
+  const el = voiceEl(activeVoiceId);
+  if (el && a) { drawVoice(el); updateVoiceTime(el, a); }
+  if (a && !a.paused) wfRaf = requestAnimationFrame(wfLoop);
+}
+function startWfLoop() { if (!wfRaf) wfRaf = requestAnimationFrame(wfLoop); }
+
+/* Persistent audio per id, with the webm/MediaRecorder duration-fix
+   (duration can report Infinity until a forced seek), wired ONCE so
+   re-renders never stack listeners. Handlers look up the live element
+   by id at event time rather than closing over a stale node. */
+function getVoiceAudio(id, src) {
+  let a = voiceAudioEls.get(id);
+  if (a) return a;
+  a = new Audio();
+  a.preload = 'metadata';
+  a.src = src;
+  a.addEventListener('loadedmetadata', () => {
+    if (a.duration === Infinity || isNaN(a.duration)) {
+      try {
+        a.currentTime = 1e101;
+        const fix = () => { a.currentTime = 0; a.removeEventListener('timeupdate', fix); };
+        a.addEventListener('timeupdate', fix);
+      } catch (e) {}
+    }
+  });
+  a.addEventListener('play',  () => { activeVoiceId = id; const el = voiceEl(id); if (el) syncVoiceBtn(el, a); startWfLoop(); });
+  a.addEventListener('pause', () => { const el = voiceEl(id); if (el) { syncVoiceBtn(el, a); drawVoice(el); updateVoiceTime(el, a); } });
+  a.addEventListener('ended', () => { a.currentTime = 0; const el = voiceEl(id); if (el) { syncVoiceBtn(el, a); drawVoice(el); updateVoiceTime(el, a); } });
+  a.addEventListener('seeked', () => { const el = voiceEl(id); if (el) { drawVoice(el); updateVoiceTime(el, a); } });
+  a.addEventListener('timeupdate', () => { if (a.paused) { const el = voiceEl(id); if (el) { drawVoice(el); updateVoiceTime(el, a); } } });
+  voiceAudioEls.set(id, a);
+  return a;
+}
+function toggleVoice(id) {
+  const a = voiceAudioEls.get(id);
+  if (!a) return;
+  if (a.paused) {
+    if (activeVoiceId && activeVoiceId !== id) { const prev = voiceAudioEls.get(activeVoiceId); if (prev) prev.pause(); }
+    activeVoiceId = id;
+    a.play().catch(() => {});
+  } else {
+    a.pause();
+  }
+}
+/* Tap = jump, drag = continuous scrub. Pointer capture keeps the drag
+   smooth; stopPropagation prevents the chat swipe-to-reply / double-
+   tap-react gestures from firing on the waveform. */
+function wireVoiceSeek(el, id) {
+  const wrap = el.querySelector('.voice-wave-wrap');
+  if (!wrap) return;
+  let seeking = false;
+  const ratioFrom = (e) => {
+    const r = wrap.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (e.clientX - r.left) / (r.width || 1)));
+  };
+  const applySeek = (ratio) => {
+    const a = voiceAudioEls.get(id);
+    const dur = voiceDur.get(id) || (a && isFinite(a.duration) ? a.duration : 0);
+    if (a && dur) a.currentTime = ratio * dur;
+    drawVoice(el); if (a) updateVoiceTime(el, a);
+  };
+  wrap.addEventListener('pointerdown', (e) => {
+    seeking = true;
+    try { wrap.setPointerCapture(e.pointerId); } catch (x) {}
+    applySeek(ratioFrom(e));
+    e.preventDefault(); e.stopPropagation();
+  });
+  wrap.addEventListener('pointermove', (e) => { if (!seeking) return; applySeek(ratioFrom(e)); e.stopPropagation(); });
+  const end = (e) => { if (!seeking) return; seeking = false; try { wrap.releasePointerCapture(e.pointerId); } catch (x) {} e.stopPropagation(); };
+  wrap.addEventListener('pointerup', end);
+  wrap.addEventListener('pointercancel', end);
+}
+/* Wire/refresh every voice bubble after a render. Element-level
+   handlers bind to the fresh nodes; the audio object + peaks are
+   cached so this is cheap and playback state is preserved. */
+function initVoicePlayers() {
+  $$('#chatBody .voice-msg').forEach(el => {
+    const id = el.dataset.id;
+    const msg = chatMessages.find(x => x.id === id);
+    if (!msg) return;
+    const a = getVoiceAudio(id, msg.body);
+    computeVoicePeaks(id, msg.body);     // cached + self-redraws on completion
+    el.querySelector('.voice-play').addEventListener('click', (e) => { e.stopPropagation(); toggleVoice(id); });
+    wireVoiceSeek(el, id);
+    syncVoiceBtn(el, a); drawVoice(el); updateVoiceTime(el, a);
+  });
+}
+/* Keep the active waveform crisp on resize; resume the loop when the
+   tab returns to the foreground (rAF is frozen while backgrounded). */
+window.addEventListener('resize', () => { $$('#chatBody .voice-msg').forEach(drawVoice); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  const a = activeVoiceId && voiceAudioEls.get(activeVoiceId);
+  if (a && !a.paused) startWfLoop();
+  const el = activeVoiceId && voiceEl(activeVoiceId);
+  if (el && a) { drawVoice(el); updateVoiceTime(el, a); }
+});
 
 /* ----- Reply state -------------------------------------------- */
 let chatReplyTo = null;
