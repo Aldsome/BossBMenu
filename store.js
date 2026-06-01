@@ -1028,8 +1028,19 @@ const Store = {
       ts:        new Date().toISOString(),
     };
     if (REMOTE_MODE && navigator.onLine) {
-      const { error } = await sb.from('bb_messages').insert(MSG_TO_ROW(msg));
+      // Let Postgres stamp created_at with its OWN clock (the column
+      // defaults to now()). Sending a device-local timestamp meant a
+      // device with a skewed clock (e.g. an admin tablet a few minutes
+      // slow) produced messages that sorted out of order and showed
+      // wrong "x ago" times to the other party. We omit created_at,
+      // then read the server-assigned value back and adopt it so the
+      // sender's own optimistic echo matches what everyone else sees.
+      const row = MSG_TO_ROW(msg);
+      delete row.created_at;
+      const { data, error } = await sb.from('bb_messages')
+        .insert(row).select('created_at').single();
       if (error) { console.warn('[Store] message insert failed', error); throw error; }
+      if (data && data.created_at) msg.ts = toIsoTs(data.created_at);
       if (kind !== 'text') Store.pruneMedia();   // keep media under cap
     } else {
       const all = readJSON('bb_chat_local', []);
