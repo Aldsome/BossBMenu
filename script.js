@@ -1681,13 +1681,17 @@ function dismissThanks() {
 /* "Continue as the SAME user" — keep clientId, keep table
    label, just hide the thanks overlay and let the customer
    browse the menu again. Their served orders stay in My Orders
-   as history; new orders will append. The reset lockout flips
-   back to false so a fresh round of "all served" will retrigger
-   the thanks card later. */
+   as history; new orders will append.
+
+   Crucially we keep `thanksShown` TRUE here: the all-served
+   condition is still true the instant the overlay is dismissed,
+   so re-arming it now would make the next banner tick (fired on
+   scroll/poll) immediately re-show the overlay in a loop. The
+   lockout is re-armed only when the customer places a NEW order
+   (see placeOrder), which is the real start of a fresh round. */
 function continueAsSameUser() {
   dismissThanks();
   closeMyOrders();
-  thanksShown = false;
   bumpInactivity();
   showToast('Welcome back ☕ Add anything else?', 'success');
 }
