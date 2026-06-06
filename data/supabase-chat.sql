@@ -1,5 +1,5 @@
 -- ============================================================
--- BOSSB COFFEE SHOP — CHAT (customer ↔ staff)
+-- ORDERINN COFFEE — CHAT (customer ↔ staff)
 -- ------------------------------------------------------------
 -- Run this in Supabase → SQL Editor → New query → Run.
 --

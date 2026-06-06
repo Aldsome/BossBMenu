@@ -1,4 +1,4 @@
-# BossB Coffee Shop — Data files
+# OrderInn Coffee — Data files
 
 ## Two storage modes
 
@@ -56,7 +56,7 @@ uniqueness, easier referential integrity once a real DB lands.
 }
 ```
 
-The default admin (`admin@bossb.com` / `admin1234`) is pre-seeded with its
+The default admin (`admin@orderinn.com` / `admin1234`) is pre-seeded with its
 hash already computed against the pepper in `store.js`. **Change the
 pepper and re-hash before going to production.**
 

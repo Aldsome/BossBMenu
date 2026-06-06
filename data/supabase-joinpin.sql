@@ -1,5 +1,5 @@
 -- ============================================================
--- BOSSB COFFEE SHOP — TABLE JOIN PIN
+-- ORDERINN COFFEE — TABLE JOIN PIN
 -- ------------------------------------------------------------
 -- Run this in Supabase → SQL Editor → New query → Run.
 -- REQUIRED before deploying the join-PIN feature: without this

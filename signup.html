@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BossB Coffee Shop — Create Account</title>
+  <title>OrderInn Coffee — Create Account</title>
   <meta name="description" content="Save your spending history and earn rewards." />
   <meta name="theme-color" content="#A0855E" />
 
@@ -29,7 +29,7 @@
   <main class="register-shell">
     <div class="register-card">
       <header class="register-head">
-        <span class="brand-mark lg">BB</span>
+        <span class="brand-mark lg">OI</span>
         <h1>Create your account</h1>
         <p class="muted small">
           Save your spending history across visits and earn rewards.
@@ -71,7 +71,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=1"></script>
-  <script src="store.js?v=15"></script>
+  <script src="store.js?v=31"></script>
   <script>
     // Customer signup — no invite code. role=customer skips the
     // invite check inside Store.registerAccount. Future work:
@@ -98,11 +98,10 @@
       }
       submit.disabled = true; submit.textContent = 'Creating…';
       try {
-        const account = await Store.registerAccount({
+        const account = await Store.signupCustomer({
           name:     fd.get('name'),
           email:    fd.get('email'),
           password,
-          role:     'customer',
         });
         okEl.textContent = `Welcome, ${account.name}! Redirecting…`;
         okEl.hidden = false;

@@ -1,5 +1,5 @@
 -- ============================================================
--- BOSSB COFFEE SHOP — PRODUCTION RLS HARDENING
+-- ORDERINN COFFEE — PRODUCTION RLS HARDENING
 -- ------------------------------------------------------------
 -- The prototype policies in supabase.sql let the anonymous role
 -- do anything (read/insert/update/delete) on every table. That

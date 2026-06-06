@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BossB Coffee Shop — Create Staff Account</title>
-  <meta name="description" content="Create a new staff account for the BossB Coffee Shop admin panel." />
+  <title>OrderInn Coffee — Create Staff Account</title>
+  <meta name="description" content="Create a new staff account for the OrderInn Coffee admin panel." />
   <meta name="theme-color" content="#A0855E" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -29,9 +29,9 @@
   <main class="register-shell">
     <div class="register-card">
       <header class="register-head">
-        <span class="brand-mark lg">BB</span>
+        <span class="brand-mark lg">OI</span>
         <h1>Create staff account</h1>
-        <p class="muted small">For BossB Coffee Shop admins. Each account gets full Admin Panel access.</p>
+        <p class="muted small">For OrderInn Coffee admins. Each account gets full Admin Panel access.</p>
       </header>
 
       <form id="registerForm" class="auth-form" novalidate>
@@ -45,7 +45,7 @@
           <input type="text" name="name" required autocomplete="name" placeholder="Juan dela Cruz" />
         </label>
         <label>Email
-          <input type="email" name="email" required autocomplete="email" placeholder="staff@bossb.com" />
+          <input type="email" name="email" required autocomplete="email" placeholder="staff@orderinn.com" />
         </label>
         <label>Password
           <input type="password" name="password" required minlength="8" autocomplete="new-password" />
@@ -74,7 +74,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=1"></script>
-  <script src="store.js?v=15"></script>
+  <script src="store.js?v=31"></script>
   <script>
     // Standalone registration flow — shares Store with the main
     // app via localStorage. On success, the new account is written
@@ -102,11 +102,10 @@
       }
       submit.disabled = true; submit.textContent = 'Creating…';
       try {
-        const account = await Store.registerAccount({
+        const account = await Store.signupAdmin({
           name:       fd.get('name'),
           email:      fd.get('email'),
           password,
-          role:       'admin',
           inviteCode: fd.get('inviteCode'),
         });
         okEl.textContent = `Welcome, ${account.name}! Redirecting…`;

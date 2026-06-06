@@ -1,5 +1,5 @@
 -- ============================================================
--- BOSSB COFFEE SHOP — SUPABASE SCHEMA
+-- ORDERINN COFFEE — SUPABASE SCHEMA
 -- ------------------------------------------------------------
 -- Paste this whole file into:
 --   Supabase project → SQL Editor → New query → Run

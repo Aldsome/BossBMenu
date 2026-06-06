@@ -1,4 +1,4 @@
-# BossB Coffee Shop — Phase 2 Plan
+# OrderInn Coffee — Phase 2 Plan
 
 Phase 1 (shipped, commit `c8e82b4`) stabilized guest identity: clientId
 history, room-abolish-on-completion (chat thread cleared), the "It's me"

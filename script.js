@@ -1,5 +1,5 @@
 /* ==========================================================
-   BOSSB COFFEE SHOP — APP LOGIC
+   ORDERINN COFFEE — APP LOGIC
    Single-file SPA with two views in the same DOM:
    - Customer ordering (default)
    - Admin panel (overlays customer view when signed in)
@@ -2234,7 +2234,7 @@ function enterAdminPanel(session) {
   // panel is the surface for every destructive action; trusting
   // the caller is not enough.
   const verified = Store.getSession();
-  if (!verified || verified.role !== 'admin') {
+  if (!verified || verified.role !== 'admin' || !Store.isAdmin()) {
     console.warn('[admin] entry blocked — no valid admin session');
     return false;
   }
@@ -3727,7 +3727,7 @@ $('#exportCsvBtn').addEventListener('click', () => {
     return;
   }
   const stamp = new Date().toISOString().slice(0, 10);
-  triggerDownload(`bossb-daily-${stamp}.csv`, csv, 'text/csv');
+  triggerDownload(`orderinn-daily-${stamp}.csv`, csv, 'text/csv');
   showAdminToast({
     title: `Exported ${todayCount} order${todayCount === 1 ? '' : 's'} (${servedCount} served)`,
     variant: 'success',
@@ -4645,6 +4645,19 @@ async function boot() {
   // doesn't accidentally pre-fill.
   localStorage.removeItem('bossb_table');
   await Store.bootSeed();
+
+  // If a remembered admin session no longer matches a live admin
+  // account (the account was renamed/removed on the server — e.g.
+  // after the admin-email rebrand), drop it and prompt a fresh
+  // sign-in so a stale "admin" can't keep panel access on this
+  // device. isAdmin() now re-validates against the synced accounts.
+  const remembered = Store.getSession();
+  if (remembered && remembered.role === 'admin' && !Store.isAdmin()) {
+    Store.logout();
+    refreshAdminHeaderBtn();
+    showToast('Your admin account changed — please sign in again', 'error');
+    openStaffLogin();
+  }
 
   // Always boot into the customer view. Admins click Staff
   // Login to enter the panel — they're never auto-redirected

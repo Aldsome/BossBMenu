@@ -1,5 +1,5 @@
 -- ============================================================
--- BOSSB COFFEE SHOP — LIVE SESSIONS TABLE
+-- ORDERINN COFFEE — LIVE SESSIONS TABLE
 -- ------------------------------------------------------------
 -- Run this in Supabase → SQL Editor → New query → Run.
 --

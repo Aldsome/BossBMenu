@@ -1,5 +1,5 @@
 /* ==========================================================
-   BOSSB COFFEE SHOP — DATA STORE
+   ORDERINN COFFEE — DATA STORE
    ----------------------------------------------------------
    Single-file SPA. Customer ordering + admin panel both live
    inside index.html. Data lives in localStorage; swap for a
@@ -12,7 +12,7 @@
      bb_users     — admin accounts (no customer accounts here)
      bb_session   — current admin session
 
-   Default admin: admin@bossb.com / admin1234
+   Default admin: admin@orderinn.com / admin1234
    ========================================================== */
 
 const STORE_KEYS = {
@@ -60,7 +60,7 @@ const MEDIA_CAP_BYTES = 50 * 1024 * 1024;
    DEFAULTS
    ========================================================== */
 const DEFAULT_CONFIG = {
-  shopName:    'BossB Coffee Shop',
+  shopName:    'OrderInn Coffee',
   tagline:     'Freshly brewed, locally loved.',
   currency:    '₱',
   tables:      12,
@@ -76,7 +76,7 @@ const DEFAULT_CONFIG = {
      their presence/typing. Admins always see the full thread. Flip on
      in Settings to allow open guest-to-guest table chat. */
   allowGuestChat: false,
-  businessName:'BossB Coffee Shop',
+  businessName:'OrderInn Coffee',
   businessAddr:'123 Sample St, Quezon City',
   businessTin: '',             // PH BIR Tax Identification Number
   /* Lifetime order tally — daily order numbers reset to #1, so
@@ -1310,9 +1310,29 @@ const Store = {
     if (s.expiresAt < Date.now()) { Store.logout(); return null; }
     return s;
   },
+  /* The live account row backing the current session, read from
+     the synced accounts cache. Returns null when the session's
+     account no longer exists — e.g. it was renamed or removed on
+     the server (such as after the admin-email rebrand). */
+  sessionAccount() {
+    const s = readJSON(STORE_KEYS.session, null);
+    if (!s || !s.email) return null;
+    const users = readJSON(STORE_KEYS.users, []);
+    return users.find(u => (u.email || '').toLowerCase() === String(s.email).toLowerCase()) || null;
+  },
   isAdmin() {
     const s = Store.getSession();
-    return !!s && s.role === 'admin';
+    if (!s || s.role !== 'admin') return false;
+    // Re-validate against the live account list: a cached "admin"
+    // session is stale if its account was removed or demoted on
+    // the server. If we have NO cached accounts (e.g. offline at
+    // boot) trust the session rather than lock a real admin out;
+    // only invalidate when the list is present and the account is
+    // absent or no longer an admin.
+    const users = readJSON(STORE_KEYS.users, []);
+    if (!users.length) return true;
+    const acct = users.find(u => (u.email || '').toLowerCase() === String(s.email).toLowerCase());
+    return !!acct && acct.role === 'admin';
   },
 
   /* ==========================================================
@@ -1320,7 +1340,7 @@ const Store = {
      exists with the default password.
      ========================================================== */
   async seedIfEmpty() {
-    const SEED_EMAIL    = 'admin@bossb.com';
+    const SEED_EMAIL    = 'admin@orderinn.com';
     const SEED_PASSWORD = 'admin1234';
     const users = await Store.getUsers();
     const expectedHash = await hashPassword(SEED_PASSWORD);
@@ -1603,6 +1623,18 @@ const Store = {
     writeJSON(STORE_KEYS.users, users);
     remoteUpsert('bb_accounts', USER_TO_ROW(account));
     return account;
+  },
+
+  /* Intention-revealing wrappers around registerAccount so call
+     sites read clearly about WHO they are creating.
+     - signupAdmin requires a valid invite code (enforced inside
+       registerAccount unless an existing admin sets skipInviteCheck).
+     - signupCustomer never needs an invite code. */
+  async signupAdmin({ email, name, password, inviteCode }) {
+    return Store.registerAccount({ email, name, password, role: 'admin', inviteCode });
+  },
+  async signupCustomer({ email, name, password }) {
+    return Store.registerAccount({ email, name, password, role: 'customer' });
   },
 
   /* Staff invite code — single shared secret existing admins

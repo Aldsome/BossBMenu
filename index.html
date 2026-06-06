@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BossB Coffee Shop — Order</title>
-  <meta name="description" content="Scan, tap, sip. In-store ordering for BossB Coffee Shop." />
+  <title>OrderInn Coffee — Order</title>
+  <meta name="description" content="Scan, tap, sip. In-store ordering for OrderInn Coffee." />
   <meta name="theme-color" content="#A0855E" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -35,9 +35,9 @@
     <header class="topbar">
       <div class="container topbar-row">
         <div class="brand">
-          <span class="brand-mark">BB</span>
+          <span class="brand-mark">OI</span>
           <div>
-            <strong class="brand-name" id="brandName">BossB Coffee Shop</strong>
+            <strong class="brand-name" id="brandName">OrderInn Coffee</strong>
             <small class="brand-tagline" id="brandTagline">Freshly brewed, locally loved.</small>
           </div>
         </div>
@@ -158,7 +158,7 @@
 
     <!-- Footer (discreet Staff Login link) -->
     <footer class="site-footer container">
-      <p class="muted small">© <span id="year"></span> BossB Coffee Shop · In-store ordering</p>
+      <p class="muted small">© <span id="year"></span> OrderInn Coffee · In-store ordering</p>
       <button class="staff-login-link" id="openStaffLoginBtn">Staff Login</button>
     </footer>
   </div>
@@ -496,7 +496,7 @@
 
       <form id="staffLoginForm" class="auth-form">
         <label>Email
-          <input type="email" name="email" required autocomplete="username" placeholder="admin@bossb.com" />
+          <input type="email" name="email" required autocomplete="username" placeholder="you@email.com" />
         </label>
         <label>Password
           <input type="password" name="password" required autocomplete="current-password" minlength="8" />
@@ -504,7 +504,6 @@
         <p class="form-error" id="staffLoginError" hidden></p>
         <button type="submit" class="btn btn-primary btn-block">Sign in</button>
         <p class="hint muted small">
-          Default: <code>admin@bossb.com</code> / <code>admin1234</code> ·
           <a href="register.html" class="link-mini">Create staff account</a>
         </p>
       </form>
@@ -518,7 +517,7 @@
   <div class="admin-panel" id="adminPanel" hidden>
     <header class="admin-topbar">
       <div class="admin-brand">
-        <span class="brand-mark sm">BB</span>
+        <span class="brand-mark sm">OI</span>
         <strong>Admin Panel</strong>
       </div>
       <div class="admin-topbar-right">
@@ -922,7 +921,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=1"></script>
-  <script src="store.js?v=30"></script>
-  <script src="script.js?v=60"></script>
+  <script src="store.js?v=31"></script>
+  <script src="script.js?v=61"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* ==========================================================
-   BOSSB COFFEE SHOP — RUNTIME CONFIG
+   ORDERINN COFFEE — RUNTIME CONFIG
    ----------------------------------------------------------
    Paste your Supabase project's URL + anon (public) key
    below. Then the app automatically switches from
