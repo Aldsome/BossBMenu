@@ -310,9 +310,47 @@ function openTableModal()  {
   const je = $('#joinPinError'); if (je) je.hidden = true;
   const closeBtn = $('#closeTableBtn');
   if (closeBtn) closeBtn.hidden = !tableModalDismissible();
+  setTableTab('table');                 // always open on the table picker
   openModal('#tableModal');
 }
 function closeTableModal() { closeModal('#tableModal'); }
+
+/* Tabbed table modal — flip between the table picker and a customer
+   login in place (the folder/bookmark tabs), keeping the card size. */
+function setTableTab(pane) {
+  document.querySelectorAll('#tableModal .card-tab').forEach(t => {
+    const on = t.dataset.pane === pane;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  document.querySelectorAll('#tableModal .tab-pane').forEach(p => {
+    p.hidden = (p.dataset.pane !== pane);
+  });
+  const title = $('#tableModalTitle');
+  if (title) title.textContent = (pane === 'login') ? 'Sign in' : 'Join or start a table';
+}
+$('#tabTableBtn')?.addEventListener('click', () => setTableTab('table'));
+$('#tabLoginBtn')?.addEventListener('click', () => setTableTab('login'));
+
+$('#tableTabLoginForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#tableTabLoginError');
+  errEl.hidden = true;
+  const fd = new FormData(e.target);
+  try {
+    const cust = await Store.loginCustomer({ email: fd.get('email'), password: fd.get('password') });
+    e.target.reset();
+    refreshProfileBtn();
+    showToast(`Welcome, ${cust.name}`, 'success');
+    // They have an identity now; if they already picked a table, close —
+    // otherwise drop them back on the table picker to choose one.
+    if (state.tableNumber) closeTableModal();
+    else { setTableTab('table'); showToast('Now pick your table to order', 'info'); }
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
 
 /* Join-by-PIN: a tablemate enters the table's 4-digit PIN and is
    dropped straight into that room — no name typed, no collision
