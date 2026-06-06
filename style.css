@@ -2598,6 +2598,42 @@ body.cart-open .fab-cart {
 .myo-select input { width: 16px; height: 16px; vertical-align: middle; }
 .btn-modify-grace { font-size: .82rem; }
 
+/* Select-to-clear: selectable rows act like tappable cards, and the
+   chosen ones get a clear highlight. */
+.myorder-item.selectable { cursor: pointer; }
+.myorder-item.selectable:hover { border-color: var(--brown-300, #c9b59a); }
+.myorder-item.selected {
+  border-color: var(--brand, #A0855E);
+  box-shadow: 0 0 0 2px var(--brand, #A0855E) inset;
+  background: var(--brown-50, #f7f1e8);
+}
+.myorders-selhint {
+  font-size: .8rem;
+  color: var(--muted, #777);
+  align-self: center;
+}
+
+/* Pinned action dock — stays visible at the bottom of the scrolling
+   list so Clear/Done never scroll out of reach while ticking boxes. */
+.myorders-dock {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px -14px -14px;       /* bleed to the body's edges */
+  padding: 10px 14px;
+  background: var(--white, #fff);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -6px 14px rgba(0,0,0,.06);
+  z-index: 2;
+}
+.myorders-dock .dock-count {
+  font-size: .85rem;
+  font-weight: 600;
+  margin-right: auto;
+}
+
 /* Placed-modal Table PIN + reminder */
 .placed-pin {
   margin: 10px 0 4px;

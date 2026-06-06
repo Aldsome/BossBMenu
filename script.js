@@ -624,6 +624,9 @@ $('#tableForm').addEventListener('submit', async (e) => {
   if (submitBtn) submitBtn.disabled = true;
   try {
     await checkDuplicateTable(label, async () => {
+      // Capture the previous label before it changes so we can tell a
+      // first-time seating apart from an actual move.
+      const prevLabel = state.tableNumber;
       // Decide what happens to active orders first; if the user opts to
       // keep their current name, abort the rename without changing it.
       const proceed = await moveOrdersOnTableChange(label);
@@ -631,6 +634,13 @@ $('#tableForm').addEventListener('submit', async (e) => {
       setTableLabel(label);
       closeTableModal();
       bumpInactivity();
+      // Confirm the outcome so the customer always sees where they landed.
+      showToast(
+        prevLabel && !sameLabel(prevLabel, label)
+          ? `You moved to "${label}"`
+          : `You're seated at "${label}"`,
+        'success'
+      );
     });
   } finally {
     if (submitBtn) submitBtn.disabled = false;
@@ -1434,10 +1444,12 @@ function refreshPlacedCancelBtn(order) {
   if (!btn.hidden) placedCancelTicker = setInterval(sync, 1000);
 }
 
-$('#placedCancelBtn').addEventListener('click', () => {
+$('#placedCancelBtn').addEventListener('click', async () => {
   const orderId = $('#placedCancelBtn').dataset.orderId;
   if (!orderId) return;
-  if (!confirm('Cancel this order? You can re-order any time.')) return;
+  if (!(await confirmAsk('Cancel this order? You can re-order any time.', {
+    title: 'Cancel order', confirmLabel: 'Cancel order', cancelLabel: 'Keep it', danger: true,
+  }))) return;
   const result = Store.customerCancelOrder(orderId);
   if (!result.ok) {
     showToast(result.reason === 'already_started'
@@ -1809,15 +1821,18 @@ function renderMyOrdersList() {
   // "clear" of MY finished orders (served/cancelled) from this list.
   const myCancellable = orders.filter(o => o.clientId === myId && Store.isCancellableByCustomer(o));
   const myClearable   = orders.filter(o => o.clientId === myId && (o.status === 'served' || o.status === 'cancelled'));
+  // In select mode the actions live in a pinned dock at the bottom, so
+  // the top toolbar only carries the entry points. Cancel-all is hidden
+  // while selecting to keep the mode focused on clearing finished orders.
   const toolbarBtns = [];
-  if (myCancellable.length) {
+  if (!myOrdersSelectMode && myCancellable.length) {
     toolbarBtns.push(`<button class="btn btn-ghost btn-mini" data-act="cancel-all">Cancel all (${myCancellable.length})</button>`);
   }
-  if (myClearable.length) {
-    toolbarBtns.push(myOrdersSelectMode
-      ? `<button class="btn btn-ghost btn-mini" data-act="clear-selected">Clear selected${selectedToClear.size ? ` (${selectedToClear.size})` : ''}</button>
-         <button class="btn btn-ghost btn-mini" data-act="select-done">Done</button>`
-      : `<button class="btn btn-ghost btn-mini" data-act="select-clear">Select to clear</button>`);
+  if (!myOrdersSelectMode && myClearable.length) {
+    toolbarBtns.push(`<button class="btn btn-ghost btn-mini" data-act="select-clear">Select to clear</button>`);
+  }
+  if (myOrdersSelectMode) {
+    toolbarBtns.push(`<span class="myorders-selhint">Tap finished orders to select, then clear them below.</span>`);
   }
   const toolbarHtml = toolbarBtns.length
     ? `<div class="myorders-toolbar">${toolbarBtns.join('')}</div>` : '';
@@ -1834,11 +1849,12 @@ function renderMyOrdersList() {
     // Only the customer who placed an order can cancel it — a
     // tablemate's order is read-only in your view.
     const cancellable = isMine && Store.isCancellableByCustomer(o);
+    const isChecked = selectable && selectedToClear.has(o.id);
     return `
-      <article class="myorder-item" data-id="${o.id}" data-status="${o.status}">
+      <article class="myorder-item${selectable ? ' selectable' : ''}${isChecked ? ' selected' : ''}" data-id="${o.id}" data-status="${o.status}"${selectable ? ' data-selectable="1"' : ''}>
         <header>
           <div>
-            ${selectable ? `<label class="myo-select"><input type="checkbox" data-clear-id="${o.id}"${selectedToClear.has(o.id) ? ' checked' : ''} aria-label="Select to clear"></label>` : ''}
+            ${selectable ? `<label class="myo-select"><input type="checkbox" data-clear-id="${o.id}"${isChecked ? ' checked' : ''} aria-label="Select to clear"></label>` : ''}
             <strong>Order #${o.number}</strong>
             <span class="myorder-who ${isMine ? 'mine' : ''}">${isMine ? 'you' : 'tablemate'}</span>
             <small class="muted"> · ${timeAgo(new Date(o.placedAt))}</small>
@@ -1869,7 +1885,18 @@ function renderMyOrdersList() {
       </div>`;
     }
   }
-  host.innerHTML = peopleHtml + pinHtml + vouchersHtml + toolbarHtml + orderRows + ctaHtml;
+  // Pinned action dock for select mode — sits at the bottom of the
+  // scrolling list (position: sticky) so Clear/Done never scroll out of
+  // view while the customer ticks boxes further up the list.
+  const dockHtml = (myOrdersSelectMode && myClearable.length)
+    ? `<div class="myorders-dock">
+         <span class="dock-count">${selectedToClear.size} selected</span>
+         <button class="btn btn-ghost btn-mini" data-act="select-done">Done</button>
+         <button class="btn btn-danger btn-mini" data-act="clear-selected"${selectedToClear.size ? '' : ' disabled'}>Clear${selectedToClear.size ? ` (${selectedToClear.size})` : ''}</button>
+       </div>`
+    : '';
+
+  host.innerHTML = peopleHtml + pinHtml + vouchersHtml + toolbarHtml + orderRows + ctaHtml + dockHtml;
 }
 
 /* Track checkbox selection for the "clear" multi-select (the 1s
@@ -1879,9 +1906,24 @@ $('#myOrdersList').addEventListener('change', (e) => {
   if (!cb) return;
   if (cb.checked) selectedToClear.add(cb.dataset.clearId);
   else            selectedToClear.delete(cb.dataset.clearId);
+  // Re-render so the pinned dock's "N selected" count and the Clear
+  // button's enabled state update immediately.
+  renderMyOrdersList();
 });
 
 $('#myOrdersList').addEventListener('click', async (e) => {
+  // Tap anywhere on a selectable row (not the checkbox/label, not a
+  // button) to toggle it while selecting — a larger, friendlier target.
+  if (myOrdersSelectMode && !e.target.closest('button[data-act]') && !e.target.closest('.myo-select')) {
+    const row = e.target.closest('.myorder-item.selectable');
+    if (row) {
+      const id = row.dataset.id;
+      if (selectedToClear.has(id)) selectedToClear.delete(id);
+      else                         selectedToClear.add(id);
+      renderMyOrdersList();
+      return;
+    }
+  }
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
   const act = btn.dataset.act;
@@ -1896,7 +1938,9 @@ $('#myOrdersList').addEventListener('click', async (e) => {
     const myId = Store.getClientId();
     const targets = Store.getMyOrders().filter(o => Store.isCancellableByCustomer(o));
     if (!targets.length) return;
-    if (!confirm(`Cancel all ${targets.length} of your open order${targets.length === 1 ? '' : 's'}?`)) return;
+    if (!(await confirmAsk(`Cancel all ${targets.length} of your open order${targets.length === 1 ? '' : 's'}?`, {
+      title: 'Cancel all orders', confirmLabel: 'Cancel all', cancelLabel: 'Keep them', danger: true,
+    }))) return;
     let ok = 0;
     targets.forEach(o => { if (Store.customerCancelOrder(o.id).ok) ok++; });
     showToast(ok ? `Cancelled ${ok} order${ok === 1 ? '' : 's'}` : 'Nothing could be cancelled', ok ? 'success' : 'error');
@@ -1932,7 +1976,9 @@ $('#myOrdersList').addEventListener('click', async (e) => {
   }
 
   if (act === 'cancel') {
-    if (!confirm('Cancel this order?')) return;
+    if (!(await confirmAsk('Cancel this order?', {
+      title: 'Cancel order', confirmLabel: 'Cancel order', cancelLabel: 'Keep it', danger: true,
+    }))) return;
     const result = Store.customerCancelOrder(id);
     if (!result.ok) {
       showToast(
@@ -2043,16 +2089,17 @@ function continueAsSameUser() {
    flight we confirm first and surface the PIN, since the orders
    stay in the store (admin still sees them) and the guest can
    rejoin by re-entering the name or the PIN. */
-function endVisit() {
+async function endVisit() {
   const here = state.tableNumber;
   if (!here) { closeMyOrders(); return; }
   const activeHere = getActiveOrdersHere();
   if (activeHere.length > 0) {
     const pin = activeHere.map(o => o.joinPin).find(Boolean);
-    const pinLine = pin ? `\n\nWrite down your PIN to rejoin: ${pin}` : '';
-    const ok = confirm(
+    const pinLine = pin ? ` Write down your PIN to rejoin: ${pin}` : '';
+    const ok = await confirmAsk(
       `You still have ${activeHere.length} order${activeHere.length === 1 ? '' : 's'} being prepared. ` +
-      `End your visit anyway? Your name will be freed for the next guest.${pinLine}`
+      `End your visit anyway? Your name will be freed for the next guest.${pinLine}`,
+      { title: 'End visit', confirmLabel: 'End visit', cancelLabel: 'Stay', danger: true }
     );
     if (!ok) return;
   }
@@ -2236,6 +2283,27 @@ function uiConfirm({ title = '', message = '', buttons = [{ label: 'OK', value: 
   });
 }
 bindBackdropClose('#uiConfirmModal', () => { const m = $('#uiConfirmModal'); if (m && m._uiClose) m._uiClose(); });
+
+/* Boolean convenience wrapper over uiConfirm — the drop-in replacement
+   for native confirm(). Returns true only if the user taps the confirm
+   button (backdrop/Esc/cancel all resolve false). Use danger:true for
+   destructive actions to colour the confirm button red. */
+async function confirmAsk(message, {
+  title        = 'Please confirm',
+  confirmLabel = 'Confirm',
+  cancelLabel  = 'Cancel',
+  danger       = false,
+  dismissable  = true,
+} = {}) {
+  const val = await uiConfirm({
+    title, message, dismissable,
+    buttons: [
+      { label: confirmLabel, value: true,  variant: danger ? 'danger' : 'primary' },
+      { label: cancelLabel,  value: false, variant: 'ghost' },
+    ],
+  });
+  return val === true;
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
@@ -2688,13 +2756,15 @@ function renderOrders() {
 }
 
 $('#orderFilter').addEventListener('change', renderOrders);
-$('#clearServedBtn').addEventListener('click', () => {
-  if (!confirm('Clear all served orders?')) return;
+$('#clearServedBtn').addEventListener('click', async () => {
+  if (!(await confirmAsk('Clear all served orders?', {
+    title: 'Clear served', confirmLabel: 'Clear served', danger: true,
+  }))) return;
   Store.clearServedOrders();
   renderOrders();
 });
 
-$('#ordersList').addEventListener('click', (e) => {
+$('#ordersList').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
   const card = btn.closest('.order-card');
@@ -2715,7 +2785,9 @@ $('#ordersList').addEventListener('click', (e) => {
     return;
   }
   if (act === 'delete') {
-    if (!confirm('Delete this order?')) return;
+    if (!(await confirmAsk('Delete this order?', {
+      title: 'Delete order', confirmLabel: 'Delete', danger: true,
+    }))) return;
     Store.deleteOrder(id);
     knownOrderIds.delete(id);
     ORDER_STATUS_BY_ID.delete(id);
@@ -2755,9 +2827,11 @@ $('#ordersList').addEventListener('change', (e) => {
   $('#deleteSelectedOrdersBtn').textContent = selectedOrders.size
     ? `Delete selected (${selectedOrders.size})` : 'Delete selected';
 });
-$('#deleteSelectedOrdersBtn').addEventListener('click', () => {
+$('#deleteSelectedOrdersBtn').addEventListener('click', async () => {
   if (!selectedOrders.size) { showAdminToast({ title: 'No orders selected', variant: 'info' }); return; }
-  if (!confirm(`Delete ${selectedOrders.size} selected order${selectedOrders.size === 1 ? '' : 's'}?`)) return;
+  if (!(await confirmAsk(`Delete ${selectedOrders.size} selected order${selectedOrders.size === 1 ? '' : 's'}?`, {
+    title: 'Delete orders', confirmLabel: 'Delete', danger: true,
+  }))) return;
   const n = selectedOrders.size;
   selectedOrders.forEach(id => {
     Store.deleteOrder(id);
@@ -3004,9 +3078,11 @@ $('#menuTableBody').addEventListener('change', (e) => {
   $('#deleteSelectedMenuBtn').textContent = selectedMenu.size
     ? `Delete selected (${selectedMenu.size})` : 'Delete selected';
 });
-$('#deleteSelectedMenuBtn').addEventListener('click', () => {
+$('#deleteSelectedMenuBtn').addEventListener('click', async () => {
   if (!selectedMenu.size) { showAdminToast({ title: 'No items selected', variant: 'info' }); return; }
-  if (!confirm(`Delete ${selectedMenu.size} selected item${selectedMenu.size === 1 ? '' : 's'}?`)) return;
+  if (!(await confirmAsk(`Delete ${selectedMenu.size} selected item${selectedMenu.size === 1 ? '' : 's'}?`, {
+    title: 'Delete items', confirmLabel: 'Delete', danger: true,
+  }))) return;
   const n = selectedMenu.size;
   selectedMenu.forEach(id => Store.deleteMenuItemLogged(id));
   selectedMenu.clear();
@@ -3020,7 +3096,7 @@ $('#deleteSelectedMenuBtn').addEventListener('click', () => {
   showAdminToast({ title: `Deleted ${n} item${n === 1 ? '' : 's'}`, variant: 'danger' });
   refreshAdminActivity();
 });
-$('#menuTableBody').addEventListener('click', (e) => {
+$('#menuTableBody').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
   const id = btn.dataset.id;
@@ -3031,7 +3107,9 @@ $('#menuTableBody').addEventListener('click', (e) => {
   if (btn.dataset.act === 'delete') {
     const item = Store.getMenu().find(m => m.id === id);
     if (!item) return;
-    if (!confirm(`Delete "${item.name}"?`)) return;
+    if (!(await confirmAsk(`Delete "${item.name}"?`, {
+      title: 'Delete item', confirmLabel: 'Delete', danger: true,
+    }))) return;
     Store.deleteMenuItemLogged(id);
     MENU = Store.getMenu();
     renderMenuTable();
@@ -3284,8 +3362,10 @@ $('#copyInviteBtn')?.addEventListener('click', async () => {
     showAdminToast({ title: 'Selected — press Ctrl+C', variant: 'info' });
   }
 });
-$('#rotateInviteBtn')?.addEventListener('click', () => {
-  if (!confirm('Rotate the invite code? Any pending invite links using the old code will stop working.')) return;
+$('#rotateInviteBtn')?.addEventListener('click', async () => {
+  if (!(await confirmAsk('Rotate the invite code? Any pending invite links using the old code will stop working.', {
+    title: 'Rotate invite code', confirmLabel: 'Rotate', danger: true,
+  }))) return;
   Store.rotateInviteCode();
   refreshInviteCodeView();
   showAdminToast({ title: 'New invite code generated', variant: 'success' });
@@ -3354,23 +3434,31 @@ $('#exportProductsBtn').addEventListener('click', () => {
   showAdminToast({ title: `Exported ${menu.length} products`, variant: 'success' });
 });
 
-$('#resetMenuBtn').addEventListener('click', () => {
-  if (!confirm('Reset menu to defaults? Custom items will be lost.')) return;
+$('#resetMenuBtn').addEventListener('click', async () => {
+  if (!(await confirmAsk('Reset menu to defaults? Custom items will be lost.', {
+    title: 'Reset menu', confirmLabel: 'Reset menu', danger: true,
+  }))) return;
   Store.resetMenu();
   MENU = Store.getMenu();
   renderMenuTable();
   renderMenu();
   showToast('Menu reset');
 });
-$('#factoryResetBtn').addEventListener('click', () => {
-  if (!confirm('Factory reset wipes everything (menu, orders, settings, sign-in). Continue?')) return;
+$('#factoryResetBtn').addEventListener('click', async () => {
+  if (!(await confirmAsk('Factory reset wipes everything (menu, orders, settings, sign-in). Continue?', {
+    title: 'Factory reset', confirmLabel: 'Reset everything', cancelLabel: 'Keep my data', danger: true, dismissable: false,
+  }))) return;
   Store.factoryReset();
   showToast('Reset complete');
   setTimeout(() => location.reload(), 600);
 });
 $('#resetEverythingBtn').addEventListener('click', async () => {
-  if (!confirm('Reset EVERYTHING to default? This clears all orders, chat, activity, sessions, accounts, menu and settings on the cloud AND this device. This affects every device and cannot be undone.')) return;
+  if (!(await confirmAsk('Reset EVERYTHING to default? This clears all orders, chat, activity, sessions, accounts, menu and settings on the cloud AND this device. This affects every device and cannot be undone.', {
+    title: 'Reset everything', confirmLabel: 'Continue', cancelLabel: 'Keep my data', danger: true, dismissable: false,
+  }))) return;
   // Type-to-confirm for a destructive, cross-device wipe.
+  // TODO: replace this native prompt() with an input-modal variant of
+  // uiConfirm so no native dialogs remain anywhere in the app.
   const typed = prompt('Type RESET to confirm the full wipe:');
   if ((typed || '').trim().toUpperCase() !== 'RESET') { showAdminToast({ title: 'Reset cancelled', variant: 'info' }); return; }
   const btn = $('#resetEverythingBtn');
@@ -3534,9 +3622,11 @@ $('#bellBtn').addEventListener('click', (e) => {
   e.stopPropagation();
   toggleBellDropdown();
 });
-$('#clearLogBtn').addEventListener('click', (e) => {
+$('#clearLogBtn').addEventListener('click', async (e) => {
   e.stopPropagation();
-  if (!confirm('Clear activity log?')) return;
+  if (!(await confirmAsk('Clear activity log?', {
+    title: 'Clear activity', confirmLabel: 'Clear', danger: true,
+  }))) return;
   Store.clearLog();
   refreshAdminActivity();
   renderBellList();
