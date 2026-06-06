@@ -33,6 +33,7 @@ const STORE_KEYS = {
   sessionTable:   'bb_session_table',   // { name, ts, clientId } — 24h guest persistence
   activeSessions: 'bb_active_sessions', // { [clientId]: { name, lastActive } } — collision check
   pendingWrites:  'bb_pending_writes',  // queue of remote writes that haven't been flushed yet
+  customer:       'bb_customer',        // signed-in customer profile { id, email, name }
 };
 
 /* How long a guest's name/table choice survives a refresh. After
@@ -295,6 +296,7 @@ const ROW_TO_USER = (r) => r && ({
   role:         r.role,
   passwordHash: r.password_hash,
   createdAt:    r.created_at,
+  perks:        r.perks || null,        // jsonb: customer points/vouchers/loyalty
 });
 const USER_TO_ROW = (u) => ({
   id:            u.id,
@@ -303,6 +305,7 @@ const USER_TO_ROW = (u) => ({
   role:          u.role,
   password_hash: u.passwordHash,
   created_at:    u.createdAt,
+  perks:         u.perks || null,       // self-heals if the column isn't migrated yet
 });
 /* Normalize a Postgres timestamptz into a value `new Date()` parses
    correctly. PostgREST returns proper ISO ("...T...+00:00"), but the
@@ -1706,6 +1709,95 @@ const Store = {
   },
   async signupCustomer({ email, name, password }) {
     return Store.registerAccount({ email, name, password, role: 'customer' });
+  },
+
+  /* ==========================================================
+     CUSTOMER ACCOUNTS  (separate from admin/staff auth)
+     - Customers sign in to earn points, redeem vouchers, and
+       track loyalty toward free items.
+     - Kept in its own STORE_KEYS.customer slot so a customer
+       login never collides with an admin staff session on the
+       same device.
+     - Perks live on the account's `perks` jsonb so they follow
+       the customer across devices (self-heals to local-only if
+       the column hasn't been migrated yet — see data/customer-perks.sql).
+     ========================================================== */
+  LOYALTY_GOAL:  100,   // lifetime points per free muffin
+  VOUCHER_COST:  50,    // spendable points to mint one discount voucher
+
+  async loginCustomer({ email, password }) {
+    const users = await Store.getUsers();
+    const user  = users.find(u => (u.email || '').toLowerCase() === String(email || '').toLowerCase());
+    if (!user) throw new Error('No account found for that email');
+    const hash = await hashPassword(password);
+    if (hash !== user.passwordHash) throw new Error('Incorrect password');
+    writeJSON(STORE_KEYS.customer, { id: user.id, email: user.email, name: user.name });
+    return Store.getCustomer();
+  },
+  getCustomer()    { return readJSON(STORE_KEYS.customer, null); },
+  logoutCustomer() { localStorage.removeItem(STORE_KEYS.customer); },
+  isCustomer()     { return !!Store.getCustomer(); },
+
+  /* The signed-in customer's full account record (with perks). */
+  _customerRecord() {
+    const c = Store.getCustomer();
+    if (!c) return null;
+    return readJSON(STORE_KEYS.users, []).find(u => u.id === c.id) || null;
+  },
+  /* Normalized perks for the signed-in customer (safe defaults). */
+  getPerks() {
+    const u = Store._customerRecord();
+    const p = (u && u.perks) || {};
+    return {
+      points:         p.points         || 0,   // spendable
+      lifetimePoints: p.lifetimePoints || 0,   // never spent — drives loyalty
+      vouchers:       Array.isArray(p.vouchers) ? p.vouchers : [],
+    };
+  },
+  _savePerks(perks) {
+    const c = Store.getCustomer();
+    if (!c) return;
+    const users = readJSON(STORE_KEYS.users, []);
+    const u = users.find(x => x.id === c.id);
+    if (!u) return;
+    u.perks = perks;
+    writeJSON(STORE_KEYS.users, users);
+    remoteUpsert('bb_accounts', USER_TO_ROW(u));   // self-heals if `perks` column absent
+  },
+  /* Award points (called when a signed-in customer places an order).
+     Bumps both the spendable balance and the lifetime total. */
+  addPoints(n) {
+    if (!Store.getCustomer() || !n) return 0;
+    const p = Store.getPerks();
+    p.points         += n;
+    p.lifetimePoints += n;
+    Store._savePerks(p);
+    return p.points;
+  },
+  /* Spend points for a random-value discount voucher. */
+  redeemVoucher() {
+    const p = Store.getPerks();
+    if (p.points < Store.VOUCHER_COST) {
+      throw new Error(`Need ${Store.VOUCHER_COST} points — you have ${p.points}.`);
+    }
+    p.points -= Store.VOUCHER_COST;
+    const pct = [5, 10, 15, 20][Math.floor(Math.random() * 4)];   // random discount
+    const voucher = {
+      code:        'V-' + Math.random().toString(36).slice(2, 7).toUpperCase(),
+      discountPct: pct,
+      createdAt:   new Date().toISOString(),
+      used:        false,
+    };
+    p.vouchers.unshift(voucher);
+    Store._savePerks(p);
+    return voucher;
+  },
+  /* Loyalty: a free muffin for every LOYALTY_GOAL lifetime points. */
+  loyaltyStatus() {
+    const { lifetimePoints } = Store.getPerks();
+    const earned   = Math.floor(lifetimePoints / Store.LOYALTY_GOAL);
+    const progress = lifetimePoints % Store.LOYALTY_GOAL;
+    return { earned, progress, goal: Store.LOYALTY_GOAL };
   },
 
   /* Staff invite code — single shared secret existing admins

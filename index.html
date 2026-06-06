@@ -23,6 +23,33 @@
       } catch (e) {}
     })();
   </script>
+
+  <!-- Customer profile / perks styles (self-contained so they ship
+       with index.html and don't depend on a style.css cache bump). -->
+  <style>
+    .profile-body { display: flex; flex-direction: column; gap: 12px; }
+    .profile-name { font-size: 18px; font-weight: 700; margin: 0; }
+    .perk-card {
+      background: rgba(160, 133, 94, 0.10);
+      border: 1px solid rgba(160, 133, 94, 0.25);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .perk-card .perk-points { font-size: 24px; font-weight: 800; }
+    .perk-row { display: flex; justify-content: space-between; align-items: baseline; }
+    .loyalty-bar { height: 8px; border-radius: 99px; background: rgba(128,128,128,0.25); overflow: hidden; }
+    .loyalty-fill { height: 100%; width: 0%; border-radius: 99px; background: #A0855E; transition: width .3s ease; }
+    .loyalty-earned { color: #1f9d55; margin: 0; }
+    .voucher-list { display: flex; flex-direction: column; gap: 8px; }
+    .voucher-item {
+      display: flex; justify-content: space-between; align-items: center;
+      border: 1px dashed rgba(160,133,94,0.5); border-radius: 10px;
+      padding: 8px 12px; font-size: 14px;
+    }
+    .voucher-item .voucher-code { font-weight: 700; letter-spacing: .5px; }
+    .voucher-item.used { opacity: .5; text-decoration: line-through; }
+  </style>
 </head>
 <body>
 
@@ -66,17 +93,32 @@
               <path fill="currentColor" d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/>
             </svg>
           </button>
+          <!-- Customer account: opens the profile (if signed in) or the
+               sign-in modal. Earns points / vouchers / loyalty. -->
+          <button class="icon-btn" id="profileBtn" aria-label="My account">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <circle cx="12" cy="8" r="3.5" fill="currentColor"/>
+              <path d="M5 20c0-3.6 3.1-5.5 7-5.5s7 1.9 7 5.5z" fill="currentColor"/>
+            </svg>
+          </button>
         </div>
       </div>
 
       <!-- Table strip — shows the table name (from ?table= URL) -->
       <div class="table-strip container">
         <span>Table</span>
-        <strong id="tableNumberDisplay">—</strong>
-        <!-- This name's share PIN — a friend on another device must
-             enter it to use/merge this name (see checkDuplicateTable). -->
-        <span class="table-pin" id="tablePinDisplay" hidden></span>
-        <button class="link-mini" id="changeTableBtn">change</button>
+        <!-- The name itself is the control now: tap it to rename or
+             move tables (replaces the old "change" link). -->
+        <strong id="tableNumberDisplay" role="button" tabindex="0"
+                title="This is your name — tap to rename or move to another table"
+                style="cursor:pointer; text-decoration: underline dotted; text-underline-offset: 3px;">—</strong>
+        <!-- This table's share PIN — tap to copy; a friend on another
+             device enters it to join this table. -->
+        <span class="table-pin" id="tablePinDisplay" hidden
+              title="Tap to copy your table PIN — share it so friends can join"
+              style="cursor:pointer;"></span>
+        <!-- Kept (hidden) so the admin header logic still has its node. -->
+        <button class="link-mini" id="changeTableBtn" hidden>change</button>
       </div>
 
       <!-- Customer's active-order status banner (poll-driven).
@@ -447,6 +489,10 @@
     <div class="modal-card small-card" role="dialog">
       <header class="modal-head">
         <h3>Join or start a table</h3>
+        <!-- Only shown once the visitor already has an identity (a
+             guest name/table or a signed-in session); first-timers
+             must pick a name so staff can find them. -->
+        <button class="icon-btn close-btn" id="closeTableBtn" aria-label="Close" hidden>✕</button>
       </header>
 
       <!-- Primary path: start a new table by entering a name/number.
@@ -510,6 +556,66 @@
           <a href="?reset=1" class="link-mini">Having issues? Reset app data on this device</a>
         </p>
       </form>
+    </div>
+  </div>
+
+  <!-- ==========================================================
+       CUSTOMER LOGIN MODAL  (earns points / vouchers / loyalty)
+       ========================================================== -->
+  <div class="modal" id="customerLoginModal" aria-hidden="true">
+    <div class="modal-card auth-card" role="dialog" aria-labelledby="customerLoginTitle">
+      <header class="modal-head">
+        <h3 id="customerLoginTitle">Sign in</h3>
+        <button class="icon-btn close-btn" id="closeCustomerLoginBtn" aria-label="Close">✕</button>
+      </header>
+      <form id="customerLoginForm" class="auth-form">
+        <label>Email
+          <input type="email" name="email" required autocomplete="username" placeholder="you@email.com" />
+        </label>
+        <label>Password
+          <input type="password" name="password" required autocomplete="current-password" />
+        </label>
+        <p class="form-error" id="customerLoginError" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+        <p class="hint muted small">
+          New here? <a href="signup.html" class="link-mini">Create an account</a> — earn points &amp; rewards.
+        </p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==========================================================
+       CUSTOMER PROFILE MODAL  (points / vouchers / loyalty)
+       ========================================================== -->
+  <div class="modal" id="profileModal" aria-hidden="true">
+    <div class="modal-card auth-card" role="dialog" aria-labelledby="profileTitle">
+      <header class="modal-head">
+        <h3 id="profileTitle">My account</h3>
+        <button class="icon-btn close-btn" id="closeProfileBtn" aria-label="Close">✕</button>
+      </header>
+      <div class="profile-body">
+        <p class="profile-name" id="profileName">—</p>
+        <p class="muted small" id="profileEmail">—</p>
+
+        <div class="perk-card">
+          <span class="muted small">Points balance</span>
+          <strong class="perk-points" id="profilePoints">0</strong>
+        </div>
+
+        <div class="perk-card">
+          <div class="perk-row">
+            <span class="muted small">Free muffin progress</span>
+            <span class="small" id="loyaltyText">0 / 100</span>
+          </div>
+          <div class="loyalty-bar"><div class="loyalty-fill" id="loyaltyFill"></div></div>
+          <p class="small loyalty-earned" id="loyaltyEarned" hidden></p>
+        </div>
+
+        <button class="btn btn-primary btn-block" id="redeemVoucherBtn">Redeem 50 pts → discount voucher</button>
+        <div class="voucher-list" id="voucherList"></div>
+
+        <button class="btn btn-ghost btn-block" id="customerLogoutBtn">Sign out</button>
+      </div>
     </div>
   </div>
 
@@ -924,7 +1030,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=1"></script>
-  <script src="store.js?v=33"></script>
-  <script src="script.js?v=63"></script>
+  <script src="store.js?v=34"></script>
+  <script src="script.js?v=64"></script>
 </body>
 </html>

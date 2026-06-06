@@ -71,7 +71,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=1"></script>
-  <script src="store.js?v=33"></script>
+  <script src="store.js?v=34"></script>
   <script>
     // Customer signup — no invite code. role=customer skips the
     // invite check inside Store.registerAccount. Future work:
@@ -108,6 +108,10 @@
           email:    fd.get('email'),
           password,
         });
+        // Sign them straight in so the account is usable immediately
+        // (previously signup created the account but left the user
+        // logged out, so "nothing happened").
+        await Store.loginCustomer({ email: fd.get('email'), password });
         okEl.textContent = `Welcome, ${account.name}! Redirecting…`;
         okEl.hidden = false;
         form.reset();

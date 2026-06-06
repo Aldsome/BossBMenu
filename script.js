@@ -251,8 +251,8 @@ function setTableLabel(label) {
     if (label && !isStaff) {
       pin = getActiveOrdersHere().map(o => o.joinPin).find(Boolean) || Store.getMyNamePin();
     }
-    if (pin) { pinEl.textContent = `PIN ${pin}`; pinEl.hidden = false; }
-    else     { pinEl.hidden = true; }
+    if (pin) { pinEl.textContent = `PIN ${pin}`; pinEl.dataset.pin = pin; pinEl.hidden = false; }
+    else     { pinEl.hidden = true; delete pinEl.dataset.pin; }
   }
   // The status banner + My-orders bubble are linked to the current
   // room, so re-evaluate them whenever the room changes (e.g. the
@@ -299,9 +299,17 @@ function openTableModalPrefilled(name) {
   $('#tableInput').value = name || '';
   openTableModal();
 }
+/* The table picker is dismissable only once the visitor already has
+   an identity — a guest name/table or a signed-in session. First-time
+   visitors must pick a name so staff can find them. */
+function tableModalDismissible() {
+  return !!state.tableNumber || !!Store.getSession() || (Store.isCustomer && Store.isCustomer());
+}
 function openTableModal()  {
   const jp = $('#joinPinInput'); if (jp) jp.value = '';
   const je = $('#joinPinError'); if (je) je.hidden = true;
+  const closeBtn = $('#closeTableBtn');
+  if (closeBtn) closeBtn.hidden = !tableModalDismissible();
   openModal('#tableModal');
 }
 function closeTableModal() { closeModal('#tableModal'); }
@@ -608,20 +616,37 @@ function moveOrdersOnTableChange(newLabel) {
   }
   refreshAdminActivity();
 }
-$('#changeTableBtn').addEventListener('click', () => {
-  // When an account is logged in (admin or, in future, a
-  // customer account) this button is "Log out" rather than
-  // "change" — the table label is the account identity, not a
-  // freely-editable guest name. adminSignOut() clears the
-  // session, drops the auto-stamped label, and re-prompts as a
-  // guest. For guests, keep the original change-table behavior.
+/* Tapping the name (or the legacy hidden "change" button) reopens the
+   name/table picker. For a signed-in admin the label IS the account
+   identity, so it acts as sign-out instead. */
+function handleChangeTable() {
   if (Store.getSession()) {
     adminSignOut();
     return;
   }
   $('#tableInput').value = state.tableNumber || '';
   openTableModal();
-});
+}
+$('#changeTableBtn').addEventListener('click', handleChangeTable);
+(function wireTableStripControls() {
+  const nameEl = $('#tableNumberDisplay');
+  if (nameEl) {
+    nameEl.addEventListener('click', handleChangeTable);
+    nameEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleChangeTable(); }
+    });
+  }
+  // Tap the header PIN to copy it (My-orders panel copy is unchanged).
+  const pinEl = $('#tablePinDisplay');
+  if (pinEl) {
+    pinEl.addEventListener('click', async () => {
+      const pin = pinEl.dataset.pin;
+      if (!pin) return;
+      await copyTextToClipboard(pin);
+      showToast('PIN copied', 'success');
+    });
+  }
+})();
 
 /* Keep the active-session registry's lastActive for THIS device
    fresh while the customer is interacting. Lets other devices
@@ -1151,6 +1176,12 @@ $('#placeOrderBtn').addEventListener('click', async () => {
   openOrderPlacedModal(order);
   refreshOrdersBadge();
   refreshMyOrdersFab();
+  // Loyalty: award points to a signed-in customer (₱10 = 1 point).
+  if (Store.isCustomer && Store.isCustomer()) {
+    const earned = Math.max(1, Math.floor((order.total || 0) / 10));
+    Store.addPoints(earned);
+    showToast(`+${earned} points earned!`, 'success');
+  }
   // A new order resets the "show thanks" lockout so a second
   // visit will retrigger it after all orders are served.
   thanksShown = false;
@@ -2101,6 +2132,13 @@ function bindBackdropClose(sel, onClose) {
 bindBackdropClose('#customizerModal', closeCustomizer);
 bindBackdropClose('#staffLoginModal', closeStaffLogin);
 bindBackdropClose('#itemModal',        closeItemModal);
+// Table picker: allow click-away + an X, but only once the visitor
+// has an identity (guest name or signed in) — see tableModalDismissible.
+bindBackdropClose('#tableModal', () => { if (tableModalDismissible()) closeTableModal(); });
+(function wireTableModalClose() {
+  const btn = $('#closeTableBtn');
+  if (btn) btn.addEventListener('click', () => { if (tableModalDismissible()) closeTableModal(); });
+})();
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
@@ -2215,6 +2253,102 @@ $('#staffLoginForm').addEventListener('submit', async (e) => {
     errEl.hidden = false;
   }
 });
+
+/* ==========================================================
+   CUSTOMER ACCOUNT  (sign in, profile, points, vouchers, loyalty)
+   ========================================================== */
+function openCustomerLogin()  { $('#customerLoginError').hidden = true; openModal('#customerLoginModal'); }
+function closeCustomerLogin()  { closeModal('#customerLoginModal'); }
+function openProfile()  { renderProfile(); openModal('#profileModal'); }
+function closeProfile() { closeModal('#profileModal'); }
+
+function refreshProfileBtn() {
+  const btn = $('#profileBtn');
+  if (!btn) return;
+  btn.classList.toggle('is-authed', Store.isCustomer());
+  btn.setAttribute('aria-label', Store.isCustomer() ? 'My account' : 'Sign in');
+}
+
+$('#profileBtn').addEventListener('click', () => {
+  if (Store.isCustomer()) openProfile();
+  else                    openCustomerLogin();
+});
+$('#closeCustomerLoginBtn').addEventListener('click', closeCustomerLogin);
+$('#closeProfileBtn').addEventListener('click', closeProfile);
+bindBackdropClose('#customerLoginModal', closeCustomerLogin);
+bindBackdropClose('#profileModal', closeProfile);
+
+$('#customerLoginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#customerLoginError');
+  errEl.hidden = true;
+  const fd = new FormData(e.target);
+  try {
+    const cust = await Store.loginCustomer({ email: fd.get('email'), password: fd.get('password') });
+    e.target.reset();
+    closeCustomerLogin();
+    refreshProfileBtn();
+    showToast(`Welcome, ${cust.name}`, 'success');
+    openProfile();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+$('#customerLogoutBtn').addEventListener('click', () => {
+  Store.logoutCustomer();
+  closeProfile();
+  refreshProfileBtn();
+  showToast('Signed out');
+});
+
+$('#redeemVoucherBtn').addEventListener('click', () => {
+  try {
+    const v = Store.redeemVoucher();
+    showToast(`Voucher created — ${v.discountPct}% off`, 'success');
+    renderProfile();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+});
+
+function renderProfile() {
+  const c = Store.getCustomer();
+  if (!c) return;
+  $('#profileName').textContent  = c.name || 'Customer';
+  $('#profileEmail').textContent = c.email || '';
+  const perks = Store.getPerks();
+  $('#profilePoints').textContent = perks.points;
+
+  const loy = Store.loyaltyStatus();
+  $('#loyaltyText').textContent = `${loy.progress} / ${loy.goal}`;
+  $('#loyaltyFill').style.width = `${Math.round((loy.progress / loy.goal) * 100)}%`;
+  const earnedEl = $('#loyaltyEarned');
+  if (loy.earned > 0) {
+    earnedEl.hidden = false;
+    earnedEl.textContent = `🎉 ${loy.earned} free muffin${loy.earned === 1 ? '' : 's'} earned — show staff to claim.`;
+  } else {
+    earnedEl.hidden = true;
+  }
+
+  const redeemBtn = $('#redeemVoucherBtn');
+  redeemBtn.disabled    = perks.points < Store.VOUCHER_COST;
+  redeemBtn.textContent = `Redeem ${Store.VOUCHER_COST} pts → discount voucher`;
+
+  const list = $('#voucherList');
+  list.innerHTML = '';
+  if (!perks.vouchers.length) {
+    list.innerHTML = '<p class="muted small">No vouchers yet — redeem points to create one.</p>';
+  } else {
+    perks.vouchers.forEach(v => {
+      const div = document.createElement('div');
+      div.className = 'voucher-item' + (v.used ? ' used' : '');
+      div.innerHTML = `<span class="voucher-code">${escapeHtml(v.code)}</span><span>${v.discountPct}% off</span>`;
+      list.appendChild(div);
+    });
+  }
+}
 
 /* ==========================================================
    ADMIN PANEL
