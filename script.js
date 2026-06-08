@@ -274,7 +274,11 @@ function refreshCartChrome() {
   const { subtotal, count } = cartTotals();
   $('#fabCartCount').textContent = count;
   $('#fabCartTotal').textContent = peso(subtotal);
-  $('#fabCartBtn').classList.toggle('hidden-empty', count === 0);
+  // Cart button stays visible even when empty (tapping opens the cart's
+  // empty state) — only the `is-empty` class dials it down visually.
+  const cartFab = $('#fabCartBtn');
+  cartFab.classList.remove('hidden-empty');
+  cartFab.classList.toggle('is-empty', count === 0);
   cartTotalEl.textContent = peso(subtotal);
   $('#placeOrderBtn').disabled = count === 0;
   updateInCartBadges();
@@ -352,6 +356,12 @@ $('#closeCartBtn').addEventListener('click', closeCart);
    The my-orders sheet uses the same rules below. */
 document.addEventListener('click', (e) => {
   const t = e.target;
+  // Guard against the "re-render during click" trap: if an in-UI action
+  // (e.g. "Select to clear" / toggling the Cancelled group) rebuilt the
+  // list, the clicked node is now detached from the DOM. A detached
+  // target can never be a genuine click-away, so bail before any of the
+  // outside-close checks below treat it as one and close the surface.
+  if (!t.isConnected) return;
   const myOrdersOpen = !$('#myOrdersSheet').hidden;
   const cartOpen     = cartDrawer.classList.contains('open');
 
@@ -988,12 +998,26 @@ function getActiveOrdersHere() {
 }
 
 function refreshMyOrdersFab() {
-  const active = getActiveOrdersHere().length;
+  const activeOrders = getActiveOrdersHere();   // newest first
+  const active = activeOrders.length;
   const fab = $('#fabMyOrdersBtn');
-  fab.hidden = (active === 0);
-  // Let the back-to-top button lift above this pill when it's present.
-  document.body.classList.toggle('has-myorders-fab', !fab.hidden);
-  $('#fabMyOrdersBadge').textContent = active;
+  // Always visible: in the session model this pill is the customer's
+  // anchor (order #, history, points, account) — it must stay reachable
+  // even after every order is served, and even before the first order.
+  fab.hidden = false;
+  document.body.classList.add('has-myorders-fab');
+  // Surface the latest active order number right on the pill so the
+  // customer can tell staff "I'm order #N" at a glance. Falls back to a
+  // plain label when nothing is in flight.
+  const txt   = fab.querySelector('.fab-myorders-text');
+  const badge = $('#fabMyOrdersBadge');
+  if (active > 0) {
+    if (txt) txt.textContent = `Order #${activeOrders[0].number}`;
+    if (badge) { badge.textContent = active; badge.hidden = (active < 2); }
+  } else {
+    if (txt) txt.textContent = 'My orders';
+    if (badge) badge.hidden = true;
+  }
   // Chat FAB only appears once this session has an order to talk about.
   const chatFab = $('#fabChatBtn');
   if (chatFab) {
@@ -1007,9 +1031,11 @@ function openMyOrders() {
   sheet.setAttribute('aria-hidden', 'false');
   requestAnimationFrame(() => sheet.classList.add('open'));
   renderMyOrdersList();
-  // Tick countdowns + auto-refresh items every 1s while open
+  // Auto-refresh while open, but only actually rebuild when the data
+  // changes (see tickMyOrders) — keeps the list from jumping / closing
+  // the Cancelled group every second.
   if (myOrdersTicker) clearInterval(myOrdersTicker);
-  myOrdersTicker = setInterval(renderMyOrdersList, 1000);
+  myOrdersTicker = setInterval(tickMyOrders, 1000);
   // First-time-only: point out where the Table PIN lives so a
   // newcomer knows what to share with their tablemates.
   if (!pinHintSeen()) {
@@ -1025,6 +1051,8 @@ function closeMyOrders() {
   sheet.setAttribute('aria-hidden', 'true');
   setTimeout(() => { sheet.hidden = true; }, 200);
   if (myOrdersTicker) { clearInterval(myOrdersTicker); myOrdersTicker = null; }
+  cancelledOpen = false;                // next open starts with the group collapsed
+  myOrdersSig = null;                   // force a fresh render on reopen
 }
 
 /* ---- First-time Table-PIN spotlight -------------------------
@@ -1104,6 +1132,36 @@ function dismissOrders(ids) {
 /* Multi-select "clear" mode for the My-orders list. */
 let myOrdersSelectMode = false;
 const selectedToClear = new Set();
+// Remembers whether the collapsible "Cancelled" group is expanded so a
+// re-render doesn't snap it shut under the user.
+let cancelledOpen = false;
+// Last-rendered data signature — the 1s ticker re-renders ONLY when this
+// changes, so an idle sheet doesn't rebuild (and jump) every second.
+let myOrdersSig = null;
+
+/* A compact fingerprint of everything the My-orders list draws from.
+   Re-render is needed only when this changes. Includes a 30s time bucket
+   so "x min ago" stays roughly fresh without per-second churn, and the
+   cancellable flag so the grace-window Cancel button disappears on time. */
+function myOrdersSignature() {
+  const dismissed = dismissedOrderIds();
+  const orders = Store.getMyOrders().filter(o => !dismissed.has(o.id));
+  const bucket = Math.floor(Date.now() / 30000);   // 30s resolution
+  const rows = orders.map(o =>
+    `${o.id}:${o.status}:${Store.isCancellableByCustomer(o) ? 1 : 0}`).join('|');
+  const perks = (Store.isCustomer && Store.isCustomer())
+    ? `${Store.getPerks().points || 0}/${(Store.getPerks().vouchers || []).length}` : 'g';
+  return `${rows}#${myOrdersSelectMode ? 1 : 0}#${[...selectedToClear].sort().join(',')}#${cancelledOpen ? 1 : 0}#${perks}#${bucket}`;
+}
+
+/* The interval-driven refresh. Cheap no-op when nothing changed, and it
+   never fires mid-selection (so ticking checkboxes is never interrupted). */
+function tickMyOrders() {
+  if (myOrdersSelectMode) return;             // don't rebuild while selecting
+  const sig = myOrdersSignature();
+  if (sig === myOrdersSig) return;            // nothing changed → no churn
+  renderMyOrdersList();
+}
 
 function renderMyOrdersList() {
   const myId = Store.getClientId();
@@ -1248,7 +1306,7 @@ function renderMyOrdersList() {
   const cancelledOrders = orders.filter(o => o.status === 'cancelled');
   const orderRows = activeOrders.map(rowHtml).join('');
   const cancelledHtml = cancelledOrders.length
-    ? `<details class="myorders-cancelled"${myOrdersSelectMode ? ' open' : ''}>
+    ? `<details class="myorders-cancelled"${(myOrdersSelectMode || cancelledOpen) ? ' open' : ''}>
          <summary>Cancelled (${cancelledOrders.length})</summary>
          <div class="myorders-cancelled-list">${cancelledOrders.map(rowHtml).join('')}</div>
        </details>`
@@ -1275,7 +1333,22 @@ function renderMyOrdersList() {
        </div>`
     : '';
 
+  // Preserve scroll position across the innerHTML swap so a refresh never
+  // jumps the list back to the top while the customer is reading/selecting.
+  const prevScroll = host.scrollTop;
   host.innerHTML = vouchersHtml + toolbarHtml + orderRows + cancelledHtml + ctaHtml + dockHtml;
+  host.scrollTop = prevScroll;
+
+  // Keep cancelledOpen in sync when the user toggles the group (the
+  // `toggle` event doesn't bubble, so bind it on the fresh node).
+  const det = host.querySelector('.myorders-cancelled');
+  if (det) det.addEventListener('toggle', () => {
+    cancelledOpen = det.open;
+    myOrdersSig = myOrdersSignature();   // keep in sync so the tick doesn't rebuild
+  });
+
+  // Record what we just drew so the ticker can skip redundant rebuilds.
+  myOrdersSig = myOrdersSignature();
 }
 
 /* Track checkbox selection for the "clear" multi-select (the 1s

@@ -1009,8 +1009,11 @@ body.vp-resizing .chips { transition: none !important; }
   background: var(--primary);
   color: var(--white);
   border: none;
-  border-radius: 999px;
-  padding: 14px 22px;
+  /* radius = half the height → renders as pill ends at full width AND a
+     perfect circle once width shrinks to the height (the empty state). */
+  border-radius: 28px;
+  height: 56px;
+  padding: 0 22px;
   font-size: .95rem;
   font-weight: 600;
   display: inline-flex;
@@ -1018,9 +1021,19 @@ body.vp-resizing .chips { transition: none !important; }
   gap: 14px;
   box-shadow: var(--shadow-lg);
   z-index: 40;
-  min-width: min(420px, 92vw);
+  width: min(420px, 92vw);
   justify-content: space-between;
-  transition: transform .25s ease, opacity .25s ease, background .15s;
+  white-space: nowrap;
+  overflow: hidden;          /* clip the label/meta as the bar contracts */
+  /* Morph between the full bar and the empty circle. The slight overshoot
+     on width/padding gives the "stretch" as it expands or pulls back in.
+     transform/opacity keep their own easing for centering + the open-hide. */
+  transition:
+    width   .5s cubic-bezier(.5, 1.5, .5, 1),
+    padding .5s cubic-bezier(.5, 1.5, .5, 1),
+    transform .25s ease,
+    opacity .25s ease,
+    background .15s;
 }
 .fab-cart:hover { background: var(--primary-deep); }
 .fab-cart.hidden-empty {
@@ -1028,10 +1041,34 @@ body.vp-resizing .chips { transition: none !important; }
   opacity: 0;
   pointer-events: none;
 }
+/* Empty cart: contract symmetrically (centered) into a circular icon. */
+.fab-cart.is-empty {
+  width: 56px;
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+}
 .fab-cart-text {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+/* The "View Cart" label + the count/total pill fade and collapse to zero
+   width as the bar becomes a circle, so only the cart glyph remains. */
+.fab-cart-text > span,
+.fab-cart-meta {
+  max-width: 240px;
+  overflow: hidden;
+  transition: opacity .25s ease, max-width .45s cubic-bezier(.5, 1.5, .5, 1),
+              margin .45s ease, padding .45s ease;
+}
+.fab-cart.is-empty .fab-cart-text { gap: 0; }
+.fab-cart.is-empty .fab-cart-text > span,
+.fab-cart.is-empty .fab-cart-meta {
+  opacity: 0;
+  max-width: 0;
+  margin: 0;
+  padding: 0;
 }
 .fab-cart-meta {
   background: rgba(255, 255, 255, 0.2);
@@ -1039,6 +1076,11 @@ body.vp-resizing .chips { transition: none !important; }
   border-radius: 999px;
   font-weight: 700;
   font-size: .88rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fab-cart,
+  .fab-cart-text > span,
+  .fab-cart-meta { transition: background .15s, opacity .15s; }
 }
 [data-theme="dark"] .fab-cart { color: #0E1419; }
 [data-theme="dark"] .fab-cart-meta { background: rgba(0, 0, 0, .18); color: inherit; }
@@ -2454,6 +2496,8 @@ body.cart-open .fab-cart {
   font-size: .78rem;
   font-weight: 700;
 }
+/* `display` above beats the bare `hidden` attribute, so hide explicitly. */
+.fab-myorders-badge[hidden] { display: none; }
 
 .myorders-sheet {
   position: fixed;
